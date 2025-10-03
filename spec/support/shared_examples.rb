@@ -34,8 +34,9 @@ end
 RSpec.shared_examples 'a mediator class method' do |mediator_class, *args|
   it 'creates an instance and calls #call' do
     # Mock the database operations to avoid actual database interaction
-    allow(DB).to receive(:[]).with(:dataclips).and_return(double('table', where: double('where', first: nil), insert: 1, update: true, delete: true))
-    
+    allow(DB).to receive(:[]).with(:dataclips).and_return(double('table', where: double('where', first: nil),
+                                                                          insert: 1, update: true, delete: true))
+
     result = mediator_class.call(*args)
     expect(result).to be_a(mediator_class)
   end
