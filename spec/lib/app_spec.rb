@@ -318,4 +318,109 @@ RSpec.describe 'Dataclips App' do
       expect(last_response).to be_ok
     end
   end
+
+  describe 'GET /api/schema' do
+    context 'when schema fetch is successful' do
+      let(:mock_schema_result) do
+        {
+          success: true,
+          schema: {
+            'users' => {
+              columns: [
+                { name: 'id', type: 'integer', nullable: false, primary_key: true, default: nil },
+                { name: 'name', type: 'varchar(255)', nullable: false, primary_key: false, default: nil },
+                { name: 'email', type: 'varchar(255)', nullable: true, primary_key: false, default: nil }
+              ],
+              column_count: 3
+            },
+            'dataclips' => {
+              columns: [
+                { name: 'uuid', type: 'uuid', nullable: false, primary_key: true, default: nil },
+                { name: 'slug', type: 'varchar(255)', nullable: false, primary_key: false, default: nil },
+                { name: 'title', type: 'varchar(255)', nullable: false, primary_key: false, default: nil }
+              ],
+              column_count: 3
+            }
+          },
+          errors: []
+        }
+      end
+
+      before do
+        allow(SchemaWorker).to receive(:fetch_schema).and_return(mock_schema_result)
+      end
+
+      it 'returns successful response with schema data' do
+        get '/api/schema'
+
+        expect(last_response).to be_ok
+        expect(last_response.content_type).to include('application/json')
+
+        response_data = JSON.parse(last_response.body)
+        expect(response_data['success']).to be true
+        expect(response_data['schema']).to be_a(Hash)
+        expect(response_data['errors']).to be_empty
+      end
+
+      it 'includes table and column information' do
+        get '/api/schema'
+
+        response_data = JSON.parse(last_response.body)
+        schema = response_data['schema']
+
+        expect(schema).to have_key('users')
+        expect(schema).to have_key('dataclips')
+
+        users_table = schema['users']
+        expect(users_table).to have_key('columns')
+        expect(users_table).to have_key('column_count')
+        expect(users_table['columns']).to be_an(Array)
+        expect(users_table['column_count']).to eq(3)
+      end
+    end
+
+    context 'when schema fetch fails' do
+      before do
+        allow(SchemaWorker).to receive(:fetch_schema).and_raise(StandardError.new('Database connection failed'))
+      end
+
+      it 'returns error response' do
+        get '/api/schema'
+
+        expect(last_response.status).to eq(500)
+        expect(last_response.content_type).to include('application/json')
+
+        response_data = JSON.parse(last_response.body)
+        expect(response_data['success']).to be false
+        expect(response_data['schema']).to be_empty
+        expect(response_data['errors']).to include('Failed to fetch schema: Database connection failed')
+      end
+    end
+
+    context 'when SchemaWorker returns error result' do
+      let(:error_result) do
+        {
+          success: false,
+          schema: {},
+          errors: ['Database error: Connection timeout']
+        }
+      end
+
+      before do
+        allow(SchemaWorker).to receive(:fetch_schema).and_return(error_result)
+      end
+
+      it 'returns the error result as JSON' do
+        get '/api/schema'
+
+        expect(last_response).to be_ok
+        expect(last_response.content_type).to include('application/json')
+
+        response_data = JSON.parse(last_response.body)
+        expect(response_data['success']).to be false
+        expect(response_data['schema']).to be_empty
+        expect(response_data['errors']).to include('Database error: Connection timeout')
+      end
+    end
+  end
 end

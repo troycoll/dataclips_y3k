@@ -6,6 +6,7 @@ require_relative 'mediators/create_dataclip_mediator'
 require_relative 'mediators/update_dataclip_mediator'
 require_relative 'mediators/delete_dataclip_mediator'
 require_relative 'workers/clip_worker'
+require_relative 'workers/schema_worker'
 
 Config.setup!
 
@@ -154,6 +155,23 @@ post '/api/sql/execute' do
       columns: [],
       row_count: 0,
       execution_time: 0
+    }.to_json
+  end
+end
+
+# API endpoint for fetching database schema
+get '/api/schema' do
+  content_type :json
+
+  begin
+    result = SchemaWorker.fetch_schema
+    result.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      schema: {},
+      errors: ["Failed to fetch schema: #{e.message}"]
     }.to_json
   end
 end

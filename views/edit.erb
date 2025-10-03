@@ -11,54 +11,246 @@
     </div>
 <% end %>
 
-<form method="POST" action="<%= @dataclip ? "/dataclips/#{@dataclip[:slug]}/update" : "/dataclips/create" %>">
-    <% if @dataclip %>
-        <input type="hidden" name="_method" value="PUT">
-    <% end %>
-    
-    <div class="form-group">
-        <label for="title">Title</label>
-        <input type="text" id="title" name="title" value="<%= @dataclip ? @dataclip[:title] : '' %>" placeholder="Enter dataclip title">
+<div class="edit-layout">
+    <div class="main-content">
+        <form method="POST" action="<%= @dataclip ? "/dataclips/#{@dataclip[:slug]}/update" : "/dataclips/create" %>">
+            <% if @dataclip %>
+                <input type="hidden" name="_method" value="PUT">
+            <% end %>
+            
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" value="<%= @dataclip ? @dataclip[:title] : '' %>" placeholder="Enter dataclip title">
+            </div>
+            
+            <div class="form-group">
+                <label for="slug">Slug</label>
+                <input type="text" id="slug" name="slug" value="<%= @dataclip ? @dataclip[:slug] : '' %>" placeholder="url-friendly-name" <%= @dataclip ? 'readonly' : '' %>>
+                <small>URL-friendly identifier for this dataclip. Cannot be changed after creation.</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" placeholder="Describe what this dataclip does..."><%= @dataclip ? @dataclip[:description] : '' %></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="sql_query">SQL Query</label>
+                <textarea id="sql_query" name="sql_query" placeholder="SELECT * FROM users WHERE created_at > '2023-01-01';" style="height: 200px; font-family: 'Monaco', 'Consolas', monospace;"><%= @dataclip ? @dataclip[:sql_query] : '' %></textarea>
+                <div class="query-actions">
+                    <button type="button" id="test-query-btn" class="btn btn-secondary btn-small">Test Query</button>
+                    <small>Test your SQL query to see the results before saving</small>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="tags">Tags</label>
+                <input type="text" id="tags" name="tags" value="<%= @dataclip && @dataclip[:tags] ? @dataclip[:tags].join(', ') : '' %>" placeholder="analytics, users, reports">
+                <small>Comma-separated tags for organizing dataclips</small>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn"><%= @dataclip ? "Update Dataclip" : "Create Dataclip" %></button>
+                <a href="/dataclips/list" class="btn btn-secondary">Cancel</a>
+                <% if @dataclip %>
+                    <a href="/dataclips/<%= @dataclip[:slug] %>" class="btn btn-secondary">View Dataclip</a>
+                <% end %>
+            </div>
+        </form>
     </div>
     
-    <div class="form-group">
-        <label for="slug">Slug</label>
-        <input type="text" id="slug" name="slug" value="<%= @dataclip ? @dataclip[:slug] : '' %>" placeholder="url-friendly-name" <%= @dataclip ? 'readonly' : '' %>>
-        <small>URL-friendly identifier for this dataclip. Cannot be changed after creation.</small>
-    </div>
-    
-    <div class="form-group">
-        <label for="description">Description</label>
-        <textarea id="description" name="description" placeholder="Describe what this dataclip does..."><%= @dataclip ? @dataclip[:description] : '' %></textarea>
-    </div>
-    
-    <div class="form-group">
-        <label for="sql_query">SQL Query</label>
-        <textarea id="sql_query" name="sql_query" placeholder="SELECT * FROM users WHERE created_at > '2023-01-01';" style="height: 200px; font-family: 'Monaco', 'Consolas', monospace;"><%= @dataclip ? @dataclip[:sql_query] : '' %></textarea>
-        <div class="query-actions">
-            <button type="button" id="test-query-btn" class="btn btn-secondary btn-small">Test Query</button>
-            <small>Test your SQL query to see the results before saving</small>
+    <div class="schema-panel">
+        <div class="schema-header">
+            <h3>Schema Explorer</h3>
+            <p>Browse database tables and columns</p>
+        </div>
+        
+        <div id="schema-loading" class="schema-state">
+            <div class="loading-spinner"></div>
+            <p>Loading schema...</p>
+        </div>
+        
+        <div id="schema-error" class="schema-state" style="display: none;">
+            <p class="error-message">Failed to load schema</p>
+            <button id="retry-schema-btn" class="btn btn-small">Retry</button>
+        </div>
+        
+        <div id="schema-empty" class="schema-state" style="display: none;">
+            <p class="empty-message">No columns or tables found</p>
+        </div>
+        
+        <div id="schema-content" class="schema-state" style="display: none;">
+            <!-- Tables will be populated here by JavaScript -->
         </div>
     </div>
-    
-    <div class="form-group">
-        <label for="tags">Tags</label>
-        <input type="text" id="tags" name="tags" value="<%= @dataclip && @dataclip[:tags] ? @dataclip[:tags].join(', ') : '' %>" placeholder="analytics, users, reports">
-        <small>Comma-separated tags for organizing dataclips</small>
-    </div>
-    
-    <div class="form-actions">
-        <button type="submit" class="btn"><%= @dataclip ? "Update Dataclip" : "Create Dataclip" %></button>
-        <a href="/dataclips/list" class="btn btn-secondary">Cancel</a>
-        <% if @dataclip %>
-            <a href="/dataclips/<%= @dataclip[:slug] %>" class="btn btn-secondary">View Dataclip</a>
-        <% end %>
-    </div>
-</form>
+</div>
 
 <%= erb :_query_results_modal %>
 
 <style>
+/* Two-column layout for edit view */
+.edit-layout {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+}
+
+.main-content {
+    flex: 1;
+    min-width: 0; /* Allows flex item to shrink below content size */
+}
+
+.schema-panel {
+    width: 320px;
+    flex-shrink: 0;
+    background: #f8f9fa;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    padding: 20px;
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+.schema-header {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+.schema-header h3 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    color: #32325d;
+}
+
+.schema-header p {
+    margin: 0;
+    font-size: 12px;
+    color: #6b7c93;
+}
+
+/* Schema states */
+.schema-state {
+    text-align: center;
+}
+
+.schema-state p {
+    margin: 8px 0;
+    font-size: 14px;
+    color: #6b7c93;
+}
+
+.error-message {
+    color: #e25950 !important;
+}
+
+.empty-message {
+    color: #8898aa !important;
+}
+
+/* Loading spinner */
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid #e1e8ed;
+    border-top: 2px solid #6772e5;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Schema content */
+.schema-table {
+    margin-bottom: 16px;
+    border: 1px solid #e1e8ed;
+    border-radius: 6px;
+    background: white;
+    overflow: hidden;
+}
+
+.schema-table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e1e8ed;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 500;
+    font-size: 14px;
+    color: #32325d;
+    transition: background-color 0.15s ease;
+}
+
+.schema-table-header:hover {
+    background: #f1f3f4;
+}
+
+.schema-table-icon {
+    font-size: 12px;
+    color: #6b7c93;
+    transition: transform 0.15s ease;
+}
+
+.schema-table.expanded .schema-table-icon {
+    transform: rotate(90deg);
+}
+
+.schema-table-content {
+    display: none;
+    padding: 0;
+}
+
+.schema-table.expanded .schema-table-content {
+    display: block;
+}
+
+.schema-column {
+    padding: 8px 16px;
+    border-bottom: 1px solid #f1f3f4;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+}
+
+.schema-column:last-child {
+    border-bottom: none;
+}
+
+.schema-column-name {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    color: #32325d;
+    font-weight: 500;
+}
+
+.schema-column-type {
+    color: #6b7c93;
+    font-size: 12px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+}
+
+/* Responsive design */
+@media (max-width: 1024px) {
+    .edit-layout {
+        flex-direction: column;
+    }
+    
+    .schema-panel {
+        width: 100%;
+        position: static;
+        max-height: none;
+        margin-top: 32px;
+    }
+}
+
 /* Query Actions */
 .query-actions {
     margin-top: 10px;
@@ -88,6 +280,115 @@
 </style>
 
 <script>
+// Schema Explorer functionality
+let schemaData = null;
+
+// Load schema on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadSchema();
+});
+
+function loadSchema() {
+    showSchemaState('loading');
+    
+    fetch('/api/schema')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                schemaData = data.schema;
+                if (Object.keys(schemaData).length === 0) {
+                    showSchemaState('empty');
+                } else {
+                    renderSchema(schemaData);
+                    showSchemaState('content');
+                }
+            } else {
+                console.error('Schema fetch failed:', data.errors);
+                showSchemaState('error');
+            }
+        })
+        .catch(error => {
+            console.error('Schema fetch error:', error);
+            showSchemaState('error');
+        });
+}
+
+function showSchemaState(state) {
+    const states = ['loading', 'error', 'empty', 'content'];
+    states.forEach(s => {
+        const element = document.getElementById(`schema-${s}`);
+        if (element) {
+            element.style.display = s === state ? 'block' : 'none';
+        }
+    });
+}
+
+function renderSchema(schema) {
+    const contentDiv = document.getElementById('schema-content');
+    contentDiv.innerHTML = '';
+    
+    // Sort tables alphabetically
+    const sortedTables = Object.keys(schema).sort();
+    
+    sortedTables.forEach(tableName => {
+        const tableData = schema[tableName];
+        const tableDiv = createTableElement(tableName, tableData);
+        contentDiv.appendChild(tableDiv);
+    });
+}
+
+function createTableElement(tableName, tableData) {
+    const tableDiv = document.createElement('div');
+    tableDiv.className = 'schema-table';
+    
+    // Table header (clickable)
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'schema-table-header';
+    headerDiv.innerHTML = `
+        <span>${tableName}</span>
+        <span class="schema-table-icon">▶</span>
+    `;
+    
+    // Table content (columns)
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'schema-table-content';
+    
+    if (tableData.columns && tableData.columns.length > 0) {
+        tableData.columns.forEach(column => {
+            const columnDiv = document.createElement('div');
+            columnDiv.className = 'schema-column';
+            columnDiv.innerHTML = `
+                <span class="schema-column-name">${column.name}</span>
+                <span class="schema-column-type">${column.type}</span>
+            `;
+            contentDiv.appendChild(columnDiv);
+        });
+    } else {
+        const noColumnsDiv = document.createElement('div');
+        noColumnsDiv.className = 'schema-column';
+        noColumnsDiv.innerHTML = '<span style="color: #8898aa; font-style: italic;">No columns found</span>';
+        contentDiv.appendChild(noColumnsDiv);
+    }
+    
+    // Click handler for expand/collapse
+    headerDiv.addEventListener('click', function() {
+        tableDiv.classList.toggle('expanded');
+    });
+    
+    tableDiv.appendChild(headerDiv);
+    tableDiv.appendChild(contentDiv);
+    
+    return tableDiv;
+}
+
+// Retry button handler
+document.addEventListener('DOMContentLoaded', function() {
+    const retryBtn = document.getElementById('retry-schema-btn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', loadSchema);
+    }
+});
+
 // Auto-generate slug from title if creating new dataclip
 <% unless @dataclip %>
 document.getElementById('title').addEventListener('input', function(e) {
