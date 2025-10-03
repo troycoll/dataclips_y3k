@@ -423,4 +423,209 @@ RSpec.describe 'Dataclips App' do
       end
     end
   end
+
+  describe 'Cache API endpoints' do
+    describe 'GET /api/cache/stats' do
+      context 'when cache stats are available' do
+        before do
+          mock_stats = {
+            total_entries: 5,
+            active_entries: 4,
+            expired_entries: 1,
+            total_hits: 12,
+            avg_hits_per_entry: 2.4,
+            cache_hit_ratio: 75.5
+          }
+          allow(ClipWorker).to receive(:cache_stats).and_return(mock_stats)
+        end
+
+        it 'returns successful response with cache statistics' do
+          get '/api/cache/stats'
+
+          expect(last_response).to be_ok
+          expect(last_response.content_type).to include('application/json')
+
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be true
+          expect(response_data['stats']).to be_a(Hash)
+          expect(response_data['stats']['total_entries']).to eq(5)
+          expect(response_data['stats']['cache_hit_ratio']).to eq(75.5)
+        end
+      end
+
+      context 'when cache stats fail' do
+        before do
+          allow(ClipWorker).to receive(:cache_stats).and_raise(StandardError.new('Cache unavailable'))
+        end
+
+        it 'returns error response' do
+          get '/api/cache/stats'
+
+          expect(last_response.status).to eq(500)
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be false
+          expect(response_data['errors']).to include('Failed to fetch cache stats: Cache unavailable')
+        end
+      end
+    end
+
+    describe 'POST /api/cache/cleanup' do
+      context 'when cleanup succeeds' do
+        before do
+          allow(ClipWorker).to receive(:cleanup_cache).and_return(3)
+        end
+
+        it 'returns successful response with cleanup count' do
+          post '/api/cache/cleanup'
+
+          expect(last_response).to be_ok
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be true
+          expect(response_data['cleared_count']).to eq(3)
+          expect(response_data['message']).to include('Cleared 3 expired cache entries')
+        end
+      end
+
+      context 'when cleanup fails' do
+        before do
+          allow(ClipWorker).to receive(:cleanup_cache).and_raise(StandardError.new('Cleanup failed'))
+        end
+
+        it 'returns error response' do
+          post '/api/cache/cleanup'
+
+          expect(last_response.status).to eq(500)
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be false
+          expect(response_data['errors']).to include('Failed to cleanup cache: Cleanup failed')
+        end
+      end
+    end
+
+    describe 'DELETE /api/cache/dataclip/:slug' do
+      context 'when invalidation succeeds' do
+        before do
+          allow(ClipWorker).to receive(:invalidate_cache).with('test-slug').and_return(2)
+        end
+
+        it 'returns successful response with invalidation count' do
+          delete '/api/cache/dataclip/test-slug'
+
+          expect(last_response).to be_ok
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be true
+          expect(response_data['cleared_count']).to eq(2)
+          expect(response_data['message']).to include("Invalidated cache for dataclip 'test-slug'")
+        end
+      end
+
+      context 'when invalidation fails' do
+        before do
+          allow(ClipWorker).to receive(:invalidate_cache).and_raise(StandardError.new('Invalidation failed'))
+        end
+
+        it 'returns error response' do
+          delete '/api/cache/dataclip/test-slug'
+
+          expect(last_response.status).to eq(500)
+          response_data = JSON.parse(last_response.body)
+          expect(response_data['success']).to be false
+          expect(response_data['errors']).to include('Failed to invalidate cache: Invalidation failed')
+        end
+      end
+    end
+
+    describe 'Schema cache API endpoints' do
+      describe 'GET /api/cache/schema/stats' do
+        context 'when schema cache stats are available' do
+          before do
+            mock_stats = {
+              total_entries: 2,
+              active_entries: 2,
+              expired_entries: 0,
+              total_hits: 8,
+              cache_hit_ratio: 80.0
+            }
+            allow(SchemaWorker).to receive(:cache_stats).and_return(mock_stats)
+          end
+
+          it 'returns successful response with schema cache statistics' do
+            get '/api/cache/schema/stats'
+
+            expect(last_response).to be_ok
+            response_data = JSON.parse(last_response.body)
+            expect(response_data['success']).to be true
+            expect(response_data['stats']['total_entries']).to eq(2)
+            expect(response_data['stats']['cache_hit_ratio']).to eq(80.0)
+          end
+        end
+
+        context 'when schema cache stats fail' do
+          before do
+            allow(SchemaWorker).to receive(:cache_stats).and_raise(StandardError.new('Schema cache unavailable'))
+          end
+
+          it 'returns error response' do
+            get '/api/cache/schema/stats'
+
+            expect(last_response.status).to eq(500)
+            response_data = JSON.parse(last_response.body)
+            expect(response_data['success']).to be false
+            expect(response_data['errors']).to include('Failed to fetch schema cache stats: Schema cache unavailable')
+          end
+        end
+      end
+
+      describe 'POST /api/cache/schema/cleanup' do
+        context 'when schema cleanup succeeds' do
+          before do
+            allow(SchemaWorker).to receive(:cleanup_cache).and_return(1)
+          end
+
+          it 'returns successful response with cleanup count' do
+            post '/api/cache/schema/cleanup'
+
+            expect(last_response).to be_ok
+            response_data = JSON.parse(last_response.body)
+            expect(response_data['success']).to be true
+            expect(response_data['cleared_count']).to eq(1)
+            expect(response_data['message']).to include('Cleared 1 expired schema cache entries')
+          end
+        end
+      end
+
+      describe 'DELETE /api/cache/schema' do
+        context 'when schema cache clear succeeds' do
+          before do
+            allow(SchemaWorker).to receive(:clear_cache).and_return(3)
+          end
+
+          it 'returns successful response with clear count' do
+            delete '/api/cache/schema'
+
+            expect(last_response).to be_ok
+            response_data = JSON.parse(last_response.body)
+            expect(response_data['success']).to be true
+            expect(response_data['cleared_count']).to eq(3)
+            expect(response_data['message']).to include('Cleared all schema cache entries')
+          end
+        end
+
+        context 'when schema cache clear fails' do
+          before do
+            allow(SchemaWorker).to receive(:clear_cache).and_raise(StandardError.new('Clear failed'))
+          end
+
+          it 'returns error response' do
+            delete '/api/cache/schema'
+
+            expect(last_response.status).to eq(500)
+            response_data = JSON.parse(last_response.body)
+            expect(response_data['success']).to be false
+            expect(response_data['errors']).to include('Failed to clear schema cache: Clear failed')
+          end
+        end
+      end
+    end
+  end
 end

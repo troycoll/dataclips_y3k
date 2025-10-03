@@ -239,4 +239,60 @@ RSpec.describe DeleteDataclipMediator do
       end
     end
   end
+
+  describe 'cache invalidation' do
+    before do
+      allow(mock_table).to receive(:where).with(slug: slug).and_return(mock_table)
+      allow(mock_table).to receive(:first).and_return(existing_dataclip)
+      allow(mock_table).to receive(:delete).and_return(1)
+    end
+
+    it 'invalidates cache when dataclip is deleted' do
+      expect(ClipWorker).to receive(:invalidate_cache).with(slug)
+
+      mediator = described_class.new(slug)
+      mediator.call
+
+      expect(mediator.success?).to be true
+      expect(mediator.deleted_dataclip).to eq(existing_dataclip)
+    end
+
+    it 'handles cache invalidation errors gracefully' do
+      allow(ClipWorker).to receive(:invalidate_cache).and_raise(StandardError.new('Cache error'))
+
+      # Capture stdout to verify warning is logged
+      original_stdout = $stdout
+      $stdout = StringIO.new
+
+      begin
+        mediator = described_class.new(slug)
+        mediator.call
+
+        # Delete should still succeed despite cache error
+        expect(mediator.success?).to be true
+        expect(mediator.deleted_dataclip).to eq(existing_dataclip)
+
+        # Warning should be logged (except in test environment)
+        if ENV['RACK_ENV'] != 'test'
+          output = $stdout.string
+          expect(output).to include('Warning: Failed to invalidate cache')
+        end
+      ensure
+        $stdout = original_stdout
+      end
+    end
+
+    context 'when ClipWorker is not defined' do
+      it 'handles missing ClipWorker gracefully' do
+        hide_const('ClipWorker')
+
+        mediator = described_class.new(slug)
+        mediator.call
+
+        # Delete should still succeed
+        expect(mediator.success?).to be true
+        expect(mediator.deleted_dataclip).to eq(existing_dataclip)
+      end
+    end
+  end
 end

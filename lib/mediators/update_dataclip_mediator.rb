@@ -54,6 +54,20 @@ class UpdateDataclipMediator < BaseMediator
     handle_database_operation do
       DB[:dataclips].where(slug: slug).update(updates)
       @dataclip = DB[:dataclips].where(slug: slug).first
+
+      # Invalidate cache when dataclip is updated, especially if SQL query changed
+      invalidate_dataclip_cache_if_enabled(slug) if updates[:sql_query]
+    end
+  end
+
+  def invalidate_dataclip_cache_if_enabled(slug)
+    return unless defined?(ClipWorker)
+
+    ClipWorker.invalidate_cache(slug)
+  rescue StandardError => e
+    # Log but don't fail the update operation due to cache issues
+    unless ENV['RACK_ENV'] == 'test'
+      puts "[UpdateDataclipMediator] Warning: Failed to invalidate cache for #{slug}: #{e.message}"
     end
   end
 end

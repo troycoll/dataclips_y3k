@@ -41,6 +41,20 @@ class DeleteDataclipMediator < BaseMediator
       DB[:dataclips].where(slug: slug).delete
       # Only set deleted_dataclip if delete was successful
       @deleted_dataclip = dataclip_to_delete
+
+      # Invalidate cache when dataclip is deleted
+      invalidate_dataclip_cache_if_enabled(slug)
+    end
+  end
+
+  def invalidate_dataclip_cache_if_enabled(slug)
+    return unless defined?(ClipWorker)
+
+    ClipWorker.invalidate_cache(slug)
+  rescue StandardError => e
+    # Log but don't fail the delete operation due to cache issues
+    unless ENV['RACK_ENV'] == 'test'
+      puts "[DeleteDataclipMediator] Warning: Failed to invalidate cache for #{slug}: #{e.message}"
     end
   end
 end
