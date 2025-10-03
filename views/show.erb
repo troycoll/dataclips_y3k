@@ -1,0 +1,167 @@
+<% @title = @dataclip ? @dataclip[:title] || @dataclip[:slug] : "Dataclip Not Found" %>
+
+<div class="header-section">
+    <% if @dataclip %>
+        <h1><%= @dataclip[:title] || "Untitled Dataclip" %></h1>
+        <p><strong>Slug:</strong> <%= @dataclip[:slug] %></p>
+        <% if @dataclip[:description] %>
+            <p><%= @dataclip[:description] %></p>
+        <% end %>
+    <% else %>
+        <h1>Dataclip Not Found</h1>
+        <p>The requested dataclip could not be found.</p>
+    <% end %>
+</div>
+
+<% if @dataclip %>
+    <div class="dataclip-details">
+        <% if @dataclip[:query] %>
+            <div class="query-section">
+                <h3>SQL Query</h3>
+                <pre><code><%= @dataclip[:query] %></code></pre>
+            </div>
+        <% end %>
+        
+        <% if @dataclip[:tags] && @dataclip[:tags].any? %>
+            <div class="tags-section">
+                <h3>Tags</h3>
+                <% @dataclip[:tags].each do |tag| %>
+                    <span class="tag"><%= tag %></span>
+                <% end %>
+            </div>
+        <% end %>
+        
+        <% if @results %>
+            <div class="results-section">
+                <h3>Query Results</h3>
+                <% if @results.any? %>
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <% @results.first.keys.each do |column| %>
+                                    <th><%= column %></th>
+                                <% end %>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% @results.each do |row| %>
+                                <tr>
+                                    <% row.values.each do |value| %>
+                                        <td><%= value %></td>
+                                    <% end %>
+                                </tr>
+                            <% end %>
+                        </tbody>
+                    </table>
+                <% else %>
+                    <p>No results found.</p>
+                <% end %>
+            </div>
+        <% end %>
+        
+        <div class="dataclip-actions">
+            <button type="button" id="execute-btn" class="btn">Execute Query</button>
+            <a href="/dataclips/<%= @dataclip[:slug] %>/edit" class="btn btn-secondary">Edit Dataclip</a>
+            <form method="POST" action="/dataclips/<%= @dataclip[:slug] %>/delete" style="display: inline;">
+                <input type="hidden" name="_method" value="DELETE">
+                <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this dataclip?')">Delete</button>
+            </form>
+        </div>
+    </div>
+<% else %>
+    <div class="not-found-actions">
+        <a href="/dataclips/list" class="btn">View All Dataclips</a>
+        <a href="/dataclips/new" class="btn btn-secondary">Create New Dataclip</a>
+    </div>
+<% end %>
+
+<%= erb :_query_results_modal %>
+
+<style>
+.tag {
+    display: inline-block;
+    background-color: #e9ecef;
+    color: #495057;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin-right: 8px;
+    margin-bottom: 4px;
+}
+
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.results-table th,
+.results-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+.results-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+}
+
+.results-table tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+.query-section pre {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    border: 1px solid #e9ecef;
+}
+
+.query-section code {
+    font-family: 'Monaco', 'Consolas', monospace;
+    color: #495057;
+}
+</style>
+
+<script>
+
+// Execute Query functionality
+<% if @dataclip %>
+document.getElementById('execute-btn').addEventListener('click', function() {
+    openModal();
+    executeDataclip('<%= @dataclip[:slug] %>');
+});
+
+function executeDataclip(slug) {
+    // Show loading, hide other states
+    document.getElementById('query-loading').style.display = 'block';
+    document.getElementById('query-error').style.display = 'none';
+    document.getElementById('query-success').style.display = 'none';
+    
+    // Make API call to execute dataclip
+    fetch(`/api/dataclips/${slug}/execute`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('query-loading').style.display = 'none';
+        
+        if (data.success) {
+            displayResults(data);
+        } else {
+            displayError(data.errors);
+        }
+    })
+    .catch(error => {
+        document.getElementById('query-loading').style.display = 'none';
+        displayError(['Network error: ' + error.message]);
+    });
+}
+<% end %>
+
+</script>

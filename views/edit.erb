@@ -1,0 +1,148 @@
+<% @title = @dataclip ? "Edit Dataclip: #{@dataclip[:title] || @dataclip[:slug]}" : "New Dataclip" %>
+
+<div class="header-section">
+    <h1><%= @dataclip ? "Edit Dataclip" : "Create New Dataclip" %></h1>
+    <p><%= @dataclip ? "Update your dataclip details and query" : "Create a new dataclip" %></p>
+</div>
+
+<% if @error %>
+    <div class="alert alert-error">
+        <%= @error %>
+    </div>
+<% end %>
+
+<form method="POST" action="<%= @dataclip ? "/dataclips/#{@dataclip[:slug]}/update" : "/dataclips/create" %>">
+    <% if @dataclip %>
+        <input type="hidden" name="_method" value="PUT">
+    <% end %>
+    
+    <div class="form-group">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="<%= @dataclip ? @dataclip[:title] : '' %>" placeholder="Enter dataclip title">
+    </div>
+    
+    <div class="form-group">
+        <label for="slug">Slug</label>
+        <input type="text" id="slug" name="slug" value="<%= @dataclip ? @dataclip[:slug] : '' %>" placeholder="url-friendly-name" <%= @dataclip ? 'readonly' : '' %>>
+        <small>URL-friendly identifier for this dataclip. Cannot be changed after creation.</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="Describe what this dataclip does..."><%= @dataclip ? @dataclip[:description] : '' %></textarea>
+    </div>
+    
+    <div class="form-group">
+        <label for="sql_query">SQL Query</label>
+        <textarea id="sql_query" name="sql_query" placeholder="SELECT * FROM users WHERE created_at > '2023-01-01';" style="height: 200px; font-family: 'Monaco', 'Consolas', monospace;"><%= @dataclip ? @dataclip[:sql_query] : '' %></textarea>
+        <div class="query-actions">
+            <button type="button" id="test-query-btn" class="btn btn-secondary btn-small">Test Query</button>
+            <small>Test your SQL query to see the results before saving</small>
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="tags">Tags</label>
+        <input type="text" id="tags" name="tags" value="<%= @dataclip && @dataclip[:tags] ? @dataclip[:tags].join(', ') : '' %>" placeholder="analytics, users, reports">
+        <small>Comma-separated tags for organizing dataclips</small>
+    </div>
+    
+    <div class="form-actions">
+        <button type="submit" class="btn"><%= @dataclip ? "Update Dataclip" : "Create Dataclip" %></button>
+        <a href="/dataclips/list" class="btn btn-secondary">Cancel</a>
+        <% if @dataclip %>
+            <a href="/dataclips/<%= @dataclip[:slug] %>" class="btn btn-secondary">View Dataclip</a>
+        <% end %>
+    </div>
+</form>
+
+<%= erb :_query_results_modal %>
+
+<style>
+/* Query Actions */
+.query-actions {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+/* Alert styles */
+.alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+
+.alert-error {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+</style>
+
+<script>
+// Auto-generate slug from title if creating new dataclip
+<% unless @dataclip %>
+document.getElementById('title').addEventListener('input', function(e) {
+    const slug = e.target.value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    document.getElementById('slug').value = slug;
+});
+<% end %>
+
+
+// Test Query functionality
+document.getElementById('test-query-btn').addEventListener('click', function() {
+    const sqlQuery = document.getElementById('sql_query').value.trim();
+    
+    if (!sqlQuery) {
+        alert('Please enter a SQL query to test.');
+        return;
+    }
+    
+    openModal();
+    executeQuery(sqlQuery);
+});
+
+function executeQuery(sqlQuery) {
+    // Show loading, hide other states
+    document.getElementById('query-loading').style.display = 'block';
+    document.getElementById('query-error').style.display = 'none';
+    document.getElementById('query-success').style.display = 'none';
+    
+    // Make API call
+    fetch('/api/sql/execute', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sql_query: sqlQuery })
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('query-loading').style.display = 'none';
+        
+        if (data.success) {
+            displayResults(data);
+        } else {
+            displayError(data.errors);
+        }
+    })
+    .catch(error => {
+        document.getElementById('query-loading').style.display = 'none';
+        displayError(['Network error: ' + error.message]);
+    });
+}
+
+</script>

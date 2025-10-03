@@ -1,0 +1,85 @@
+<% @title = "All Dataclips" %>
+
+<div class="header-section">
+    <h1>Dataclips</h1>
+    <p>Manage your dataclips and queries</p>
+    <a href="/dataclips/edit" class="btn">Create New Dataclip</a>
+</div>
+
+<div class="dataclips-section">
+    <% if @dataclips && @dataclips.any? %>
+        <% @dataclips.each do |dataclip| %>
+            <div class="dataclip-item">
+                <h3><%= dataclip[:title] || "New Dataclip" %></h3>
+                <p><strong>Slug:</strong> <%= dataclip[:slug] %></p>
+                <% if dataclip[:description] %>
+                    <p><%= dataclip[:description] %></p>
+                <% end %>
+                <% if dataclip[:sql_query] %>
+                    <details>
+                        <summary>SQL Query</summary>
+                        <pre><code><%= dataclip[:sql_query] %></code></pre>
+                    </details>
+                <% end %>
+                <div class="dataclip-actions">
+                    <button type="button" class="btn execute-btn" data-slug="<%= dataclip[:slug] %>">Execute</button>
+                    <a href="/dataclips/<%= dataclip[:slug] %>" class="btn btn-secondary">View</a>
+                    <a href="/dataclips/<%= dataclip[:slug] %>/edit" class="btn btn-secondary">Edit</a>
+                    <form method="POST" action="/dataclips/<%= dataclip[:slug] %>/delete" style="display: inline;">
+                        <input type="hidden" name="_method" value="DELETE">
+                        <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this dataclip?')">Delete</button>
+                    </form>
+                </div>
+            </div>
+        <% end %>
+    <% else %>
+        <div class="alert alert-info">
+            <p>No dataclips found. <a href="/dataclips/edit">Create your first dataclip</a> to get started.</p>
+        </div>
+    <% end %>
+</div>
+
+<%= erb :_query_results_modal %>
+
+<script>
+// Execute Query functionality for all execute buttons
+document.addEventListener('DOMContentLoaded', function() {
+    const executeButtons = document.querySelectorAll('.execute-btn');
+    executeButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const slug = this.getAttribute('data-slug');
+            openModal();
+            executeDataclip(slug);
+        });
+    });
+});
+
+function executeDataclip(slug) {
+    // Show loading, hide other states
+    document.getElementById('query-loading').style.display = 'block';
+    document.getElementById('query-error').style.display = 'none';
+    document.getElementById('query-success').style.display = 'none';
+    
+    // Make API call to execute dataclip
+    fetch(`/api/dataclips/${slug}/execute`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('query-loading').style.display = 'none';
+        
+        if (data.success) {
+            displayResults(data);
+        } else {
+            displayError(data.errors);
+        }
+    })
+    .catch(error => {
+        document.getElementById('query-loading').style.display = 'none';
+        displayError(['Network error: ' + error.message]);
+    });
+}
+</script>
