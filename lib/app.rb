@@ -175,3 +175,123 @@ get '/api/schema' do
     }.to_json
   end
 end
+
+# API endpoint for cache statistics
+get '/api/cache/stats' do
+  content_type :json
+
+  begin
+    stats = ClipWorker.cache_stats
+    {
+      success: true,
+      stats: stats
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      stats: {},
+      errors: ["Failed to fetch cache stats: #{e.message}"]
+    }.to_json
+  end
+end
+
+# API endpoint for cache cleanup (remove expired entries)
+post '/api/cache/cleanup' do
+  content_type :json
+
+  begin
+    cleared_count = ClipWorker.cleanup_cache
+    {
+      success: true,
+      message: "Cleared #{cleared_count} expired cache entries",
+      cleared_count: cleared_count
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      errors: ["Failed to cleanup cache: #{e.message}"]
+    }.to_json
+  end
+end
+
+# API endpoint for invalidating cache for a specific dataclip
+delete '/api/cache/dataclip/:slug' do
+  content_type :json
+
+  begin
+    cleared_count = ClipWorker.invalidate_cache(params[:slug])
+    {
+      success: true,
+      message: "Invalidated cache for dataclip '#{params[:slug]}'",
+      cleared_count: cleared_count
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      errors: ["Failed to invalidate cache: #{e.message}"]
+    }.to_json
+  end
+end
+
+# API endpoint for schema cache statistics
+get '/api/cache/schema/stats' do
+  content_type :json
+
+  begin
+    stats = SchemaWorker.cache_stats
+    {
+      success: true,
+      stats: stats
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      stats: {},
+      errors: ["Failed to fetch schema cache stats: #{e.message}"]
+    }.to_json
+  end
+end
+
+# API endpoint for schema cache cleanup (remove expired entries)
+post '/api/cache/schema/cleanup' do
+  content_type :json
+
+  begin
+    cleared_count = SchemaWorker.cleanup_cache
+    {
+      success: true,
+      message: "Cleared #{cleared_count} expired schema cache entries",
+      cleared_count: cleared_count
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      errors: ["Failed to cleanup schema cache: #{e.message}"]
+    }.to_json
+  end
+end
+
+# API endpoint for clearing all schema cache
+delete '/api/cache/schema' do
+  content_type :json
+
+  begin
+    cleared_count = SchemaWorker.clear_cache
+    {
+      success: true,
+      message: "Cleared all schema cache entries",
+      cleared_count: cleared_count
+    }.to_json
+  rescue StandardError => e
+    status 500
+    {
+      success: false,
+      errors: ["Failed to clear schema cache: #{e.message}"]
+    }.to_json
+  end
+end

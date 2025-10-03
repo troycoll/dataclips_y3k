@@ -8,18 +8,33 @@ class SchemaWorker
   class << self
     # Fetch PostgreSQL database schema information (user-defined tables with columns and types)
     # @param connection_url [String] Optional database URL, defaults to ENV['DATABASE_URL']
+    # @param cache_enabled [Boolean] Whether to use caching (defaults to system config)
+    # @param cache_ttl [Integer] Cache TTL in seconds (defaults to system config)
     # @return [Hash] Result hash with success status, schema data, and any errors
-    def fetch_schema(connection_url = :default)
+    def fetch_schema(connection_url = :default, cache_enabled: nil, cache_ttl: nil)
       # Handle explicitly passed nil vs default parameter
       connection_url = ENV['DATABASE_URL'] if connection_url == :default
+      cache_enabled = cache_enabled.nil? ? schema_caching_enabled? : cache_enabled
+      cache_ttl ||= default_schema_cache_ttl
 
       validate_connection_url!(connection_url)
+
+      # Try to get cached result if caching is enabled
+      if cache_enabled
+        cached_result = get_cached_schema_result(connection_url)
+        if cached_result
+          log_cache_hit(connection_url)
+          return cached_result
+        end
+      end
 
       result = {
         success: false,
         schema: {},
         errors: []
       }
+
+      start_time = Time.now
 
       begin
         # Create a separate connection for the worker to avoid interfering with main app
@@ -35,8 +50,15 @@ class SchemaWorker
 
         result[:success] = true
         result[:schema] = schema_data
+        result[:fetch_time] = ((Time.now - start_time) * 1000).round(2) # milliseconds
 
-        log_schema_fetch(tables.length)
+        # Cache the result if caching is enabled and fetch was successful
+        if cache_enabled && result[:success]
+          cache_schema_result(connection_url, result, cache_ttl)
+          log_cache_write(connection_url)
+        end
+
+        log_schema_fetch(tables.length, result[:fetch_time])
       rescue Sequel::DatabaseError => e
         result[:errors] << "Database error: #{e.message}"
         log_error(e)
@@ -48,6 +70,27 @@ class SchemaWorker
       end
 
       result
+    end
+
+    # Clear schema cache
+    def clear_cache
+      return 0 unless schema_caching_enabled?
+
+      clear_all_schema_cache
+    end
+
+    # Get schema cache statistics
+    def cache_stats
+      return {} unless schema_caching_enabled?
+
+      get_schema_cache_stats
+    end
+
+    # Clear expired schema cache entries
+    def cleanup_cache
+      return 0 unless schema_caching_enabled?
+
+      clear_expired_schema_cache
     end
 
     private
@@ -183,16 +226,63 @@ class SchemaWorker
       logger
     end
 
-    def log_schema_fetch(table_count)
+    def log_schema_fetch(table_count, fetch_time = nil)
       return if ENV['RACK_ENV'] == 'test'
 
-      puts "[SchemaWorker] Fetched schema for #{table_count} tables"
+      time_info = fetch_time ? " (#{fetch_time}ms)" : ''
+      puts "[SchemaWorker] Fetched schema for #{table_count} tables#{time_info}"
     end
 
     def log_error(error)
       return if ENV['RACK_ENV'] == 'test'
 
       puts "[SchemaWorker] Error fetching schema: #{error.message}"
+    end
+
+    def log_cache_hit(connection_url)
+      return if ENV['RACK_ENV'] == 'test'
+
+      conn_info = sanitize_connection_for_log(connection_url)
+      puts "[SchemaWorker] Cache HIT: #{conn_info}"
+    end
+
+    def log_cache_write(connection_url)
+      return if ENV['RACK_ENV'] == 'test'
+
+      conn_info = sanitize_connection_for_log(connection_url)
+      puts "[SchemaWorker] Cache WRITE: #{conn_info}"
+    end
+
+    # Check if schema caching is enabled
+    def schema_caching_enabled?
+      return false unless defined?(SQLiteInitializer)
+
+      SQLiteInitializer.schema_caching_enabled?
+    rescue StandardError
+      false
+    end
+
+    # Get default schema cache TTL
+    def default_schema_cache_ttl
+      return 7200 unless defined?(SQLiteInitializer)
+
+      SQLiteInitializer.cache_config[:schema_default_ttl]
+    rescue StandardError
+      7200
+    end
+
+    # Sanitize connection URL for logging (remove sensitive info)
+    def sanitize_connection_for_log(connection_url)
+      uri = URI.parse(connection_url)
+
+      # Check if this looks like a valid database URL
+      # Database URLs should have a scheme and host
+      return 'database' unless uri.scheme && uri.host
+
+      uri.password = '***' if uri.password
+      uri.to_s
+    rescue StandardError
+      'database'
     end
   end
 end

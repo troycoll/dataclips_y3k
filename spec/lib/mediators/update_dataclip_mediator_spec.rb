@@ -312,16 +312,97 @@ RSpec.describe UpdateDataclipMediator do
       end
     end
 
-  describe 'database error handling' do
-    include_examples 'a mediator with database error handling', UpdateDataclipMediator, :update_dataclip_record, 'test-slug', { title: 'Updated' } do
-      def setup_error_scenario(error)
-        allow(mock_table).to receive(:where).with(slug: 'test-slug').and_return(double(first: existing_dataclip))
-        mock_where_clause = double('where_clause')
-        allow(mock_table).to receive(:where).with(slug: 'test-slug').and_return(mock_where_clause)
-        allow(mock_where_clause).to receive(:first).and_return(existing_dataclip)
-        allow(mock_where_clause).to receive(:update).and_raise(error)
+    describe 'database error handling' do
+      include_examples 'a mediator with database error handling', UpdateDataclipMediator, :update_dataclip_record,
+                       'test-slug', { title: 'Updated' } do
+        def setup_error_scenario(error)
+          allow(mock_table).to receive(:where).with(slug: 'test-slug').and_return(double(first: existing_dataclip))
+          mock_where_clause = double('where_clause')
+          allow(mock_table).to receive(:where).with(slug: 'test-slug').and_return(mock_where_clause)
+          allow(mock_where_clause).to receive(:first).and_return(existing_dataclip)
+          allow(mock_where_clause).to receive(:update).and_raise(error)
+        end
       end
     end
-  end
+
+    describe 'cache invalidation' do
+      before do
+        allow(mock_table).to receive(:where).with(slug: slug).and_return(mock_table)
+        allow(mock_table).to receive(:first).and_return(existing_dataclip)
+        allow(mock_table).to receive(:update).and_return(1)
+      end
+
+      context 'when SQL query is updated' do
+        let(:params_with_sql_update) do
+          {
+            title: 'Updated Title',
+            sql_query: 'SELECT * FROM new_table'
+          }
+        end
+
+        it 'invalidates cache when SQL query changes' do
+          expect(ClipWorker).to receive(:invalidate_cache).with(slug)
+
+          mediator = described_class.new(slug, params_with_sql_update)
+          mediator.call
+
+          expect(mediator.success?).to be true
+        end
+
+        it 'handles cache invalidation errors gracefully' do
+          allow(ClipWorker).to receive(:invalidate_cache).and_raise(StandardError.new('Cache error'))
+
+          # Capture stdout to verify warning is logged
+          original_stdout = $stdout
+          $stdout = StringIO.new
+
+          begin
+            mediator = described_class.new(slug, params_with_sql_update)
+            mediator.call
+
+            # Update should still succeed despite cache error
+            expect(mediator.success?).to be true
+
+            # Warning should be logged (except in test environment)
+            if ENV['RACK_ENV'] != 'test'
+              output = $stdout.string
+              expect(output).to include('Warning: Failed to invalidate cache')
+            end
+          ensure
+            $stdout = original_stdout
+          end
+        end
+      end
+
+      context 'when SQL query is not updated' do
+        let(:params_without_sql_update) do
+          {
+            title: 'Updated Title Only',
+            description: 'Updated description only'
+          }
+        end
+
+        it 'does not invalidate cache when SQL query is unchanged' do
+          expect(ClipWorker).not_to receive(:invalidate_cache)
+
+          mediator = described_class.new(slug, params_without_sql_update)
+          mediator.call
+
+          expect(mediator.success?).to be true
+        end
+      end
+
+      context 'when ClipWorker is not defined' do
+        it 'handles missing ClipWorker gracefully' do
+          hide_const('ClipWorker')
+
+          mediator = described_class.new(slug, { sql_query: 'SELECT 1' })
+          mediator.call
+
+          # Update should still succeed
+          expect(mediator.success?).to be true
+        end
+      end
+    end
   end
 end
