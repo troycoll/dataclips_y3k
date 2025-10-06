@@ -94,7 +94,7 @@ RSpec.describe HerokuClient do
 
     context 'when request is successful' do
       before do
-        allow(mock_addon_client).to receive(:list).with(app_name).and_return(addons_response)
+        allow(mock_addon_client).to receive(:list_by_app).with(app_name).and_return(addons_response)
       end
 
       it 'returns array of addons' do
@@ -105,13 +105,13 @@ RSpec.describe HerokuClient do
 
       it 'calls the platform API addon list method' do
         client.fetch_addons(app_name)
-        expect(mock_addon_client).to have_received(:list).with(app_name)
+        expect(mock_addon_client).to have_received(:list_by_app).with(app_name)
       end
     end
 
     context 'when app is not found' do
       before do
-        allow(mock_addon_client).to receive(:list).with(app_name).and_raise(
+        allow(mock_addon_client).to receive(:list_by_app).with(app_name).and_raise(
           Excon::Error::NotFound.new('Not Found')
         )
       end
@@ -126,7 +126,7 @@ RSpec.describe HerokuClient do
 
     context 'when API request fails' do
       before do
-        allow(mock_addon_client).to receive(:list).with(app_name).and_raise(
+        allow(mock_addon_client).to receive(:list_by_app).with(app_name).and_raise(
           Excon::Error::BadRequest.new('Bad Request')
         )
       end
@@ -248,7 +248,7 @@ RSpec.describe HerokuClient do
     end
 
     before do
-      allow(mock_addon_client).to receive(:list).with(app_name).and_return(addons_response)
+      allow(mock_addon_client).to receive(:list_by_app).with(app_name).and_return(addons_response)
     end
 
     it 'returns only PostgreSQL addons' do
@@ -446,7 +446,7 @@ RSpec.describe HerokuClient do
 
     context 'when an unexpected error occurs' do
       before do
-        allow(mock_addon_client).to receive(:list).with(app_name).and_raise(
+        allow(mock_addon_client).to receive(:list_by_app).with(app_name).and_raise(
           StandardError.new('Unexpected error')
         )
       end

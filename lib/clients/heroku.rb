@@ -41,7 +41,7 @@ class HerokuClient
   def fetch_addons(app_name)
     validate_app_name!(app_name)
 
-    @client.addon.list(app_name)
+    @client.addon.list_by_app(app_name)
   rescue ArgumentError => e
     raise e
   rescue Excon::Error::NotFound => e
