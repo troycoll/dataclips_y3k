@@ -9,7 +9,9 @@ RSpec.describe CreateDataclipMediator do
       title: 'Test Dataclip',
       description: 'A test dataclip',
       sql_query: 'SELECT * FROM users',
-      created_by: 'test_user'
+      created_by: 'test_user',
+      addon_id: 'test_addon_id',
+      addon_name: 'test_addon_name'
     }
   end
 
@@ -187,6 +189,8 @@ RSpec.describe CreateDataclipMediator do
           title: 'Test Dataclip',
           description: 'A test dataclip',
           sql_query: 'SELECT * FROM users',
+          addon_id: 'test_addon_id',
+          addon_name: 'test_addon_name',
           created_by: 'test_user',
           created_at: anything,
           updated_at: anything
@@ -204,6 +208,8 @@ RSpec.describe CreateDataclipMediator do
           title: 'Test Dataclip',
           description: nil,
           sql_query: 'SELECT * FROM users',
+          addon_id: nil,
+          addon_name: nil,
           created_by: nil,
           created_at: anything,
           updated_at: anything

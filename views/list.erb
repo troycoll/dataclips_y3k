@@ -11,7 +11,9 @@
         <% @dataclips.each do |dataclip| %>
             <div class="dataclip-item">
                 <h3><%= dataclip[:title] || "New Dataclip" %></h3>
-                <p><strong>Slug:</strong> <%= dataclip[:slug] %></p>
+                <% if dataclip[:addon_name] %>
+                    <p><strong>Heroku Addon:</strong> <%= dataclip[:addon_name] %></p>
+                <% end %>
                 <% if dataclip[:description] %>
                     <p><%= dataclip[:description] %></p>
                 <% end %>

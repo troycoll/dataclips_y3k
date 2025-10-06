@@ -11,6 +11,8 @@ class UpdateDataclipMediator < BaseMediator
     @description = params[:description]&.to_s&.strip
     @sql_query = params[:sql_query]&.to_s&.strip
     @created_by = params[:created_by]&.to_s&.strip
+    @addon_id = params[:addon_id]&.to_s&.strip
+    @addon_name = params[:addon_name]&.to_s&.strip
   end
 
   def call
@@ -25,7 +27,7 @@ class UpdateDataclipMediator < BaseMediator
 
   private
 
-  attr_reader :slug, :title, :description, :sql_query, :created_by
+  attr_reader :slug, :title, :description, :sql_query, :created_by, :addon_id, :addon_name
 
   def validate_params
     validate_presence(:title, 'Title is required') if title
@@ -50,6 +52,8 @@ class UpdateDataclipMediator < BaseMediator
     updates[:description] = description.empty? ? nil : description if description
     updates[:sql_query] = sql_query if sql_query && !sql_query.empty?
     updates[:created_by] = created_by.empty? ? nil : created_by if created_by
+    updates[:addon_id] = addon_id.empty? ? nil : addon_id if addon_id
+    updates[:addon_name] = addon_name.empty? ? nil : addon_name if addon_name
 
     handle_database_operation do
       DB[:dataclips].where(slug: slug).update(updates)

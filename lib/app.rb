@@ -5,6 +5,7 @@ require_relative '../config/config'
 require_relative 'mediators/create_dataclip_mediator'
 require_relative 'mediators/update_dataclip_mediator'
 require_relative 'mediators/delete_dataclip_mediator'
+require_relative 'mediators/sync_addons_mediator'
 require_relative 'workers/clip_worker'
 require_relative 'workers/schema_worker'
 
@@ -33,6 +34,14 @@ helpers do
   def flash_messages
     flash_errors + flash_success
   end
+
+  def sync_heroku_addons
+    # Sync addons from Heroku API (silently fails if not configured)
+    result = SyncAddonsMediator.call
+    # Don't show errors to user if Heroku is not configured (e.g., in development)
+    # Just log them internally
+    puts "Addon sync: #{result.success? ? "synced #{result.synced_count}" : result.errors.join(', ')}" if ENV['LOG_LEVEL'] == 'debug'
+  end
 end
 
 get '/' do
@@ -40,6 +49,7 @@ get '/' do
 end
 
 get '/dataclips/list' do
+  sync_heroku_addons
   @dataclips = get_all_dataclips
   erb :list
 end
@@ -51,6 +61,7 @@ get '/dataclips/new' do
 end
 
 get '/dataclips/:slug/edit' do
+  sync_heroku_addons
   # For editing an existing dataclip
   @dataclip = get_dataclip(params[:slug])
 
