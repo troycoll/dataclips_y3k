@@ -10,10 +10,8 @@ RSpec.describe SQLiteInitializer do
   end
 
   after(:each) do
-    # Clean up cache between tests
-    CACHE_DB[:dataclip_results].delete if defined?(CACHE_DB)
-    CACHE_DB[:schema_cache].delete if defined?(CACHE_DB)
-    CACHE_DB[:cache_stats].delete if defined?(CACHE_DB)
+    # Clean up cache between tests using the centralized reset method
+    SQLiteInitializer.reset_cache!
   end
 
   describe '.setup!' do
@@ -50,37 +48,37 @@ RSpec.describe SQLiteInitializer do
       }
     end
 
-    describe '#generate_dataclip_cache_key' do
+    describe 'DataclipCache.generate_cache_key' do
       it 'generates consistent cache keys for same query' do
-        key1 = generate_dataclip_cache_key(sql_query)
-        key2 = generate_dataclip_cache_key(sql_query)
+        key1 = DataclipCache.send(:generate_cache_key, sql_query)
+        key2 = DataclipCache.send(:generate_cache_key, sql_query)
         expect(key1).to eq(key2)
       end
 
       it 'generates different keys for different queries' do
-        key1 = generate_dataclip_cache_key('SELECT 1')
-        key2 = generate_dataclip_cache_key('SELECT 2')
+        key1 = DataclipCache.send(:generate_cache_key, 'SELECT 1')
+        key2 = DataclipCache.send(:generate_cache_key, 'SELECT 2')
         expect(key1).not_to eq(key2)
       end
 
       it 'includes dataclip slug when provided' do
-        key_with_slug = generate_dataclip_cache_key(sql_query, nil, 'test-slug')
-        key_without_slug = generate_dataclip_cache_key(sql_query)
+        key_with_slug = DataclipCache.send(:generate_cache_key, sql_query, dataclip_slug: 'test-slug')
+        key_without_slug = DataclipCache.send(:generate_cache_key, sql_query)
         expect(key_with_slug).not_to eq(key_without_slug)
         expect(key_with_slug).to include('test-slug')
       end
 
       it 'includes parameters hash when provided' do
         params = { user_id: 123 }
-        key_with_params = generate_dataclip_cache_key(sql_query, params)
-        key_without_params = generate_dataclip_cache_key(sql_query)
+        key_with_params = DataclipCache.send(:generate_cache_key, sql_query, parameters: params)
+        key_without_params = DataclipCache.send(:generate_cache_key, sql_query)
         expect(key_with_params).not_to eq(key_without_params)
       end
     end
 
-    describe '#cache_dataclip_result' do
+    describe 'DataclipCache.cache_result' do
       it 'stores result in cache' do
-        cache_key = cache_dataclip_result(sql_query, result_hash)
+        cache_key = DataclipCache.cache_result(sql_query, result_hash)
         expect(cache_key).to be_a(String)
 
         cached_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
@@ -89,7 +87,7 @@ RSpec.describe SQLiteInitializer do
       end
 
       it 'separates result data from metadata' do
-        cache_key = cache_dataclip_result(sql_query, result_hash)
+        cache_key = DataclipCache.cache_result(sql_query, result_hash)
         cached_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
 
         result_data = JSON.parse(cached_entry[:result_data], symbolize_names: true)
@@ -103,7 +101,7 @@ RSpec.describe SQLiteInitializer do
 
       it 'sets expiration timestamp' do
         ttl = 1800 # 30 minutes
-        cache_key = cache_dataclip_result(sql_query, result_hash, nil, nil, ttl)
+        cache_key = DataclipCache.cache_result(sql_query, result_hash, ttl_seconds: ttl)
         cached_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
 
         expect(cached_entry[:expires_at]).to be > Time.now
@@ -112,13 +110,13 @@ RSpec.describe SQLiteInitializer do
       end
     end
 
-    describe '#get_cached_dataclip_result' do
+    describe 'DataclipCache.get_result' do
       before do
-        cache_dataclip_result(sql_query, result_hash)
+        DataclipCache.cache_result(sql_query, result_hash)
       end
 
       it 'retrieves cached result' do
-        cached_result = get_cached_dataclip_result(sql_query)
+        cached_result = DataclipCache.get_result(sql_query)
         expect(cached_result).not_to be_nil
         expect(cached_result[:success]).to be true
         expect(cached_result[:data]).to eq(result_hash[:data])
@@ -126,18 +124,18 @@ RSpec.describe SQLiteInitializer do
       end
 
       it 'includes cache metadata in result' do
-        cached_result = get_cached_dataclip_result(sql_query)
+        cached_result = DataclipCache.get_result(sql_query)
         expect(cached_result[:cached]).to be true
         expect(cached_result[:cache_key]).to be_a(String)
         expect(cached_result[:cached_at]).to be_a(Time)
       end
 
       it 'increments hit count on access' do
-        cache_key = generate_dataclip_cache_key(sql_query)
+        cache_key = DataclipCache.send(:generate_cache_key, sql_query)
         initial_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
         expect(initial_entry[:hit_count]).to eq(0)
 
-        get_cached_dataclip_result(sql_query)
+        DataclipCache.get_result(sql_query)
 
         updated_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
         expect(updated_entry[:hit_count]).to eq(1)
@@ -145,9 +143,9 @@ RSpec.describe SQLiteInitializer do
 
       it 'returns nil for expired entries' do
         # Create an expired entry
-        cache_key = cache_dataclip_result(sql_query, result_hash, nil, nil, -1) # Already expired
+        cache_key = DataclipCache.cache_result(sql_query, result_hash, ttl_seconds: -1) # Already expired
 
-        cached_result = get_cached_dataclip_result(sql_query)
+        cached_result = DataclipCache.get_result(sql_query)
         expect(cached_result).to be_nil
 
         # Verify expired entry was deleted
@@ -156,15 +154,15 @@ RSpec.describe SQLiteInitializer do
       end
     end
 
-    describe '#invalidate_dataclip_cache' do
+    describe 'DataclipCache.invalidate_by_slug' do
       before do
-        cache_dataclip_result(sql_query, result_hash, 'test-slug')
-        cache_dataclip_result('SELECT 2', result_hash, 'test-slug')
-        cache_dataclip_result('SELECT 3', result_hash, 'other-slug')
+        DataclipCache.cache_result(sql_query, result_hash, dataclip_slug: 'test-slug')
+        DataclipCache.cache_result('SELECT 2', result_hash, dataclip_slug: 'test-slug')
+        DataclipCache.cache_result('SELECT 3', result_hash, dataclip_slug: 'other-slug')
       end
 
       it 'removes cache entries for specific dataclip slug' do
-        deleted_count = invalidate_dataclip_cache('test-slug')
+        deleted_count = DataclipCache.invalidate_by_slug('test-slug')
         expect(deleted_count).to eq(2)
 
         # Verify only the correct entries were deleted
@@ -176,20 +174,20 @@ RSpec.describe SQLiteInitializer do
       end
     end
 
-    describe '#get_dataclip_cache_stats' do
+    describe 'DataclipCache.stats' do
       before do
         # Create some test cache entries with different hit counts
-        cache_dataclip_result('SELECT 1', result_hash)
-        cache_dataclip_result('SELECT 2', result_hash)
+        DataclipCache.cache_result('SELECT 1', result_hash)
+        DataclipCache.cache_result('SELECT 2', result_hash)
 
         # Simulate some hits
-        get_cached_dataclip_result('SELECT 1')
-        get_cached_dataclip_result('SELECT 1')
-        get_cached_dataclip_result('SELECT 2')
+        DataclipCache.get_result('SELECT 1')
+        DataclipCache.get_result('SELECT 1')
+        DataclipCache.get_result('SELECT 2')
       end
 
       it 'returns comprehensive cache statistics' do
-        stats = get_dataclip_cache_stats
+        stats = DataclipCache.stats
 
         expect(stats).to have_key(:total_entries)
         expect(stats).to have_key(:active_entries)
@@ -223,28 +221,28 @@ RSpec.describe SQLiteInitializer do
       }
     end
 
-    describe '#generate_schema_cache_key' do
+    describe 'SchemaCache.generate_cache_key' do
       it 'generates consistent cache keys for same connection' do
-        key1 = generate_schema_cache_key(connection_url)
-        key2 = generate_schema_cache_key(connection_url)
+        key1 = SchemaCache.send(:generate_cache_key, connection_url)
+        key2 = SchemaCache.send(:generate_cache_key, connection_url)
         expect(key1).to eq(key2)
       end
 
       it 'generates different keys for different connections' do
-        key1 = generate_schema_cache_key('postgres://localhost:5432/db1')
-        key2 = generate_schema_cache_key('postgres://localhost:5432/db2')
+        key1 = SchemaCache.send(:generate_cache_key, 'postgres://localhost:5432/db1')
+        key2 = SchemaCache.send(:generate_cache_key, 'postgres://localhost:5432/db2')
         expect(key1).not_to eq(key2)
       end
 
       it 'starts with schema prefix' do
-        key = generate_schema_cache_key(connection_url)
+        key = SchemaCache.send(:generate_cache_key, connection_url)
         expect(key).to start_with('schema:')
       end
     end
 
-    describe '#cache_schema_result' do
+    describe 'SchemaCache.cache_result' do
       it 'stores schema result in cache' do
-        cache_key = cache_schema_result(connection_url, schema_result)
+        cache_key = SchemaCache.cache_result(connection_url, schema_result)
         expect(cache_key).to be_a(String)
 
         cached_entry = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
@@ -252,7 +250,7 @@ RSpec.describe SQLiteInitializer do
       end
 
       it 'calculates schema metadata' do
-        cache_key = cache_schema_result(connection_url, schema_result)
+        cache_key = SchemaCache.cache_result(connection_url, schema_result)
         cached_entry = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
 
         metadata = JSON.parse(cached_entry[:schema_metadata], symbolize_names: true)
@@ -261,41 +259,41 @@ RSpec.describe SQLiteInitializer do
       end
 
       it 'uses longer default TTL for schemas' do
-        cache_key = cache_schema_result(connection_url, schema_result)
+        cache_key = SchemaCache.cache_result(connection_url, schema_result)
         cached_entry = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
 
         expect(cached_entry[:ttl_seconds]).to eq(7200) # 2 hours default
       end
     end
 
-    describe '#get_cached_schema_result' do
+    describe 'SchemaCache.get_result' do
       before do
-        cache_schema_result(connection_url, schema_result)
+        SchemaCache.cache_result(connection_url, schema_result)
       end
 
       it 'retrieves cached schema result' do
-        cached_result = get_cached_schema_result(connection_url)
+        cached_result = SchemaCache.get_result(connection_url)
         expect(cached_result).not_to be_nil
         expect(cached_result[:success]).to be true
         expect(cached_result[:schema]).to eq(schema_result[:schema])
       end
 
       it 'includes cache and metadata information' do
-        cached_result = get_cached_schema_result(connection_url)
+        cached_result = SchemaCache.get_result(connection_url)
         expect(cached_result[:cached]).to be true
         expect(cached_result[:table_count]).to eq(1)
         expect(cached_result[:total_columns]).to eq(2)
       end
     end
 
-    describe '#get_schema_cache_stats' do
+    describe 'SchemaCache.stats' do
       before do
-        cache_schema_result(connection_url, schema_result)
-        get_cached_schema_result(connection_url)
+        SchemaCache.cache_result(connection_url, schema_result)
+        SchemaCache.get_result(connection_url)
       end
 
       it 'returns schema-specific cache statistics' do
-        stats = get_schema_cache_stats
+        stats = SchemaCache.stats
 
         expect(stats).to have_key(:total_entries)
         expect(stats).to have_key(:total_hits)

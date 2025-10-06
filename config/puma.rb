@@ -44,6 +44,13 @@ before_fork do
   # Close database connections before forking
   # This prevents connection sharing between parent and child processes
   ActiveRecord::Base.connection_pool.disconnect! if defined?(ActiveRecord::Base)
+
+  # Close Sequel SQLite cache connection before forking
+  # In-memory SQLite databases cannot be safely shared across forked processes
+  if defined?(CACHE_DB)
+    CACHE_DB.disconnect
+    puts '  - Disconnected SQLite cache before fork'
+  end
 end
 
 # Code to run when a worker boots to setup the process before booting
@@ -52,4 +59,15 @@ on_worker_boot do
   # Reconnect to database after forking
   # Each worker needs its own connection pool
   ActiveRecord::Base.establish_connection if defined?(ActiveRecord::Base)
+
+  # Recreate SQLite cache database for this worker
+  # Each worker gets its own in-memory cache to avoid fork safety issues
+  if defined?(SQLiteInitializer)
+    # Remove the old constant to allow recreation
+    Object.send(:remove_const, :CACHE_DB) if defined?(CACHE_DB)
+
+    # Re-run setup to create fresh in-memory database for this worker
+    SQLiteInitializer.setup!
+    puts '  - Recreated SQLite cache for worker'
+  end
 end

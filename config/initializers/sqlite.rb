@@ -14,6 +14,21 @@ module SQLiteInitializer
       puts '✓ SQLite cache database initialized'
     end
 
+    # Reset cache for testing - clears all tables and resets module instances
+    def reset_cache!
+      return unless defined?(CACHE_DB)
+
+      # Clear all cache tables
+      CACHE_DB[:dataclip_results].delete if CACHE_DB.table_exists?(:dataclip_results)
+      CACHE_DB[:schema_cache].delete if CACHE_DB.table_exists?(:schema_cache)
+      CACHE_DB[:cache_stats].delete if CACHE_DB.table_exists?(:cache_stats)
+
+      # Reset module-level database references to ensure fresh state
+      DataclipCache.db = CACHE_DB if defined?(DataclipCache)
+      SchemaCache.db = CACHE_DB if defined?(SchemaCache)
+      CacheStats.db = CACHE_DB if defined?(CacheStats)
+    end
+
     # Alternative file-based cache setup (if needed)
     def setup_file_cache!(cache_file = 'tmp/cache.db')
       file_connection = Sequel.sqlite(cache_file)
@@ -128,370 +143,425 @@ module SQLiteInitializer
     end
 
     def setup_helper_methods
-      Object.class_eval do
-        # Generate cache key for dataclip results
-        def generate_dataclip_cache_key(sql_query, parameters = nil, dataclip_slug = nil)
-          query_hash = Digest::SHA256.hexdigest(sql_query.strip.downcase)
-          params_hash = parameters ? Digest::SHA256.hexdigest(parameters.to_json) : nil
+      # Load cache modules
+      puts '  - SQLite cache modules loaded'
+    end
+  end
+end
 
-          key_parts = [query_hash]
-          key_parts << params_hash if params_hash
-          key_parts << dataclip_slug if dataclip_slug
+# Dedicated module for dataclip result caching
+module DataclipCache
+  class << self
+    attr_writer :db
 
-          "dataclip:#{key_parts.join(':')}"
-        end
+    def db
+      @db ||= CACHE_DB
+    end
 
-        # Cache dataclip results in SQLite
-        def cache_dataclip_result(sql_query, result_hash, dataclip_slug = nil, parameters = nil, ttl_seconds = 3600)
-          cache_key = generate_dataclip_cache_key(sql_query, parameters, dataclip_slug)
-          query_hash = Digest::SHA256.hexdigest(sql_query.strip.downcase)
-          params_hash = parameters ? Digest::SHA256.hexdigest(parameters.to_json) : nil
-          expires_at = Time.now + ttl_seconds
+    # Cache a dataclip result
+    def cache_result(sql_query, result_hash, dataclip_slug: nil, parameters: nil, ttl_seconds: 3600)
+      cache_key = generate_cache_key(sql_query, parameters: parameters, dataclip_slug: dataclip_slug)
+      query_hash = hash_query(sql_query)
+      params_hash = parameters ? hash_parameters(parameters) : nil
+      expires_at = Time.now + ttl_seconds
 
-          # Separate result data from metadata
-          result_data = {
-            success: result_hash[:success],
-            data: result_hash[:data],
-            errors: result_hash[:errors] || []
-          }
+      result_data = extract_result_data(result_hash)
+      result_metadata = extract_result_metadata(result_hash)
 
-          result_metadata = {
-            columns: result_hash[:columns],
-            row_count: result_hash[:row_count],
-            execution_time: result_hash[:execution_time]
-          }
+      db[:dataclip_results].insert_conflict(:replace).insert(
+        cache_key: cache_key,
+        dataclip_slug: dataclip_slug,
+        query_hash: query_hash,
+        sql_query: sql_query,
+        result_data: result_data.to_json,
+        result_metadata: result_metadata.to_json,
+        parameters_hash: params_hash,
+        cached_at: Time.now,
+        expires_at: expires_at,
+        ttl_seconds: ttl_seconds,
+        hit_count: 0,
+        last_accessed_at: Time.now
+      )
 
-          CACHE_DB[:dataclip_results].insert_conflict(:replace).insert(
-            cache_key: cache_key,
-            dataclip_slug: dataclip_slug,
-            query_hash: query_hash,
-            sql_query: sql_query,
-            result_data: result_data.to_json,
-            result_metadata: result_metadata.to_json,
-            parameters_hash: params_hash,
-            cached_at: Time.now,
-            expires_at: expires_at,
-            ttl_seconds: ttl_seconds,
-            hit_count: 0,
-            last_accessed_at: Time.now
-          )
+      CacheStats.record('cache_writes', '1')
+      cache_key
+    end
 
-          record_cache_stat('cache_writes', '1')
-          cache_key
-        end
+    # Retrieve a cached dataclip result
+    def get_result(sql_query, parameters: nil, dataclip_slug: nil)
+      cache_key = generate_cache_key(sql_query, parameters: parameters, dataclip_slug: dataclip_slug)
+      cached = db[:dataclip_results].where(cache_key: cache_key).first
 
-        # Get cached dataclip result from SQLite
-        def get_cached_dataclip_result(sql_query, parameters = nil, dataclip_slug = nil)
-          cache_key = generate_dataclip_cache_key(sql_query, parameters, dataclip_slug)
-          cached = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
+      return nil unless cached
+      return nil if expired?(cached)
 
-          return nil unless cached
+      update_hit_tracking(cache_key, cached)
+      reconstruct_result(cached)
+    end
 
-          # Check if cache is expired
-          if Time.now > cached[:expires_at]
-            CACHE_DB[:dataclip_results].where(cache_key: cache_key).delete
-            record_cache_stat('cache_expiries', '1')
-            return nil
-          end
+    # Invalidate cache entries for a specific dataclip
+    def invalidate_by_slug(dataclip_slug)
+      deleted_count = db[:dataclip_results].where(dataclip_slug: dataclip_slug).delete
+      CacheStats.record('cache_invalidations', deleted_count.to_s)
+      deleted_count
+    end
 
-          # Update hit count and last accessed time
-          CACHE_DB[:dataclip_results].where(cache_key: cache_key).update(
-            hit_count: cached[:hit_count] + 1,
-            last_accessed_at: Time.now
-          )
+    # Invalidate cache entries by query
+    def invalidate_by_query(sql_query)
+      query_hash = hash_query(sql_query)
+      deleted_count = db[:dataclip_results].where(query_hash: query_hash).delete
+      CacheStats.record('cache_invalidations', deleted_count.to_s)
+      deleted_count
+    end
 
-          # Reconstruct full result hash
-          result_data = JSON.parse(cached[:result_data], symbolize_names: true)
-          result_metadata = JSON.parse(cached[:result_metadata], symbolize_names: true)
+    # Clear expired cache entries
+    def clear_expired
+      deleted_count = db[:dataclip_results].where(
+        Sequel.lit('expires_at < datetime("now")')
+      ).delete
+      CacheStats.record('expired_entries_cleared', deleted_count.to_s)
+      deleted_count
+    end
 
-          record_cache_stat('cache_hits', '1')
+    # Clear all cache entries
+    def clear_all
+      deleted_count = db[:dataclip_results].delete
+      CacheStats.record('full_cache_clear', '1')
+      deleted_count
+    end
 
-          result_data.merge(result_metadata).merge(
-            cached: true,
-            cache_key: cache_key,
-            cached_at: cached[:cached_at]
-          )
-        end
+    # Get cache statistics
+    def stats
+      total_entries = db[:dataclip_results].count
+      expired_entries = db[:dataclip_results].where(
+        Sequel.lit('expires_at < datetime("now")')
+      ).count
 
-        # Invalidate cache entries for a specific dataclip
-        def invalidate_dataclip_cache(dataclip_slug)
-          deleted_count = CACHE_DB[:dataclip_results].where(dataclip_slug: dataclip_slug).delete
-          record_cache_stat('cache_invalidations', deleted_count.to_s)
-          deleted_count
-        end
+      hit_stats = db[:dataclip_results].select(
+        Sequel.function(:sum, :hit_count).as(:total_hits),
+        Sequel.function(:avg, :hit_count).as(:avg_hits_per_entry),
+        Sequel.function(:max, :hit_count).as(:max_hits)
+      ).first
 
-        # Invalidate cache entries by query hash
-        def invalidate_query_cache(sql_query)
-          query_hash = Digest::SHA256.hexdigest(sql_query.strip.downcase)
-          deleted_count = CACHE_DB[:dataclip_results].where(query_hash: query_hash).delete
-          record_cache_stat('cache_invalidations', deleted_count.to_s)
-          deleted_count
-        end
+      size_stats = db[:dataclip_results].select(
+        Sequel.function(:sum, Sequel.function(:length, :result_data)).as(:total_data_size),
+        Sequel.function(:avg, Sequel.function(:length, :result_data)).as(:avg_entry_size)
+      ).first
 
-        # Clear expired cache entries
-        def clear_expired_dataclip_cache
-          deleted_count = CACHE_DB[:dataclip_results].where(
-            Sequel.lit('expires_at < datetime("now")')
-          ).delete
-          record_cache_stat('expired_entries_cleared', deleted_count.to_s)
-          deleted_count
-        end
+      {
+        total_entries: total_entries,
+        expired_entries: expired_entries,
+        active_entries: total_entries - expired_entries,
+        total_hits: hit_stats[:total_hits] || 0,
+        avg_hits_per_entry: hit_stats[:avg_hits_per_entry]&.round(2) || 0,
+        max_hits: hit_stats[:max_hits] || 0,
+        total_data_size_bytes: size_stats[:total_data_size] || 0,
+        avg_entry_size_bytes: size_stats[:avg_entry_size]&.round(0) || 0,
+        cache_hit_ratio: CacheStats.calculate_hit_ratio('cache_hits', 'cache_writes')
+      }
+    end
 
-        # Clear all cache entries
-        def clear_all_dataclip_cache
-          deleted_count = CACHE_DB[:dataclip_results].delete
-          record_cache_stat('full_cache_clear', '1')
-          deleted_count
-        end
+    # Get top cached queries by hit count
+    def top_queries(limit = 10)
+      db[:dataclip_results]
+        .select(:dataclip_slug, :sql_query, :hit_count, :cached_at, :last_accessed_at)
+        .order(Sequel.desc(:hit_count))
+        .limit(limit)
+        .all
+    end
 
-        # Get cache statistics
-        def get_dataclip_cache_stats
-          total_entries = CACHE_DB[:dataclip_results].count
-          expired_entries = CACHE_DB[:dataclip_results].where(
-            Sequel.lit('expires_at < datetime("now")')
-          ).count
+    private
 
-          hit_stats = CACHE_DB[:dataclip_results].select(
-            Sequel.function(:sum, :hit_count).as(:total_hits),
-            Sequel.function(:avg, :hit_count).as(:avg_hits_per_entry),
-            Sequel.function(:max, :hit_count).as(:max_hits)
-          ).first
+    def generate_cache_key(sql_query, parameters: nil, dataclip_slug: nil)
+      query_hash = hash_query(sql_query)
+      params_hash = parameters ? hash_parameters(parameters) : nil
 
-          size_stats = CACHE_DB[:dataclip_results].select(
-            Sequel.function(:sum, Sequel.function(:length, :result_data)).as(:total_data_size),
-            Sequel.function(:avg, Sequel.function(:length, :result_data)).as(:avg_entry_size)
-          ).first
+      key_parts = [query_hash]
+      key_parts << params_hash if params_hash
+      key_parts << dataclip_slug if dataclip_slug
 
-          {
-            total_entries: total_entries,
-            expired_entries: expired_entries,
-            active_entries: total_entries - expired_entries,
-            total_hits: hit_stats[:total_hits] || 0,
-            avg_hits_per_entry: hit_stats[:avg_hits_per_entry]&.round(2) || 0,
-            max_hits: hit_stats[:max_hits] || 0,
-            total_data_size_bytes: size_stats[:total_data_size] || 0,
-            avg_entry_size_bytes: size_stats[:avg_entry_size]&.round(0) || 0,
-            cache_hit_ratio: calculate_cache_hit_ratio
-          }
-        end
+      "dataclip:#{key_parts.join(':')}"
+    end
 
-        # Get top cached queries by hit count
-        def get_top_cached_queries(limit = 10)
-          CACHE_DB[:dataclip_results]
-            .select(:dataclip_slug, :sql_query, :hit_count, :cached_at, :last_accessed_at)
-            .order(Sequel.desc(:hit_count))
-            .limit(limit)
-            .all
-        end
+    def hash_query(sql_query)
+      Digest::SHA256.hexdigest(sql_query.strip.downcase)
+    end
 
-        # Schema caching methods
-        # Generate cache key for schema results
-        def generate_schema_cache_key(connection_url)
-          connection_hash = Digest::SHA256.hexdigest(sanitize_connection_url(connection_url))
-          "schema:#{connection_hash}"
-        end
+    def hash_parameters(parameters)
+      Digest::SHA256.hexdigest(parameters.to_json)
+    end
 
-        # Cache schema results in SQLite
-        def cache_schema_result(connection_url, result_hash, ttl_seconds = 7200)
-          cache_key = generate_schema_cache_key(connection_url)
-          connection_hash = Digest::SHA256.hexdigest(sanitize_connection_url(connection_url))
-          expires_at = Time.now + ttl_seconds
+    def extract_result_data(result_hash)
+      {
+        success: result_hash[:success],
+        data: result_hash[:data],
+        errors: result_hash[:errors] || []
+      }
+    end
 
-          # Separate result data from metadata
-          schema_data = {
-            success: result_hash[:success],
-            schema: result_hash[:schema],
-            errors: result_hash[:errors] || []
-          }
+    def extract_result_metadata(result_hash)
+      {
+        columns: result_hash[:columns],
+        row_count: result_hash[:row_count],
+        execution_time: result_hash[:execution_time]
+      }
+    end
 
-          # Calculate metadata
-          table_count = result_hash[:schema]&.keys&.length || 0
-          total_columns = result_hash[:schema]&.values&.map { |table| table[:column_count] || 0 }&.sum || 0
-
-          schema_metadata = {
-            table_count: table_count,
-            total_columns: total_columns,
-            fetch_time: result_hash[:fetch_time] || 0
-          }
-
-          CACHE_DB[:schema_cache].insert_conflict(:replace).insert(
-            cache_key: cache_key,
-            connection_hash: connection_hash,
-            schema_data: schema_data.to_json,
-            schema_metadata: schema_metadata.to_json,
-            cached_at: Time.now,
-            expires_at: expires_at,
-            ttl_seconds: ttl_seconds,
-            hit_count: 0,
-            last_accessed_at: Time.now
-          )
-
-          record_cache_stat('schema_cache_writes', '1')
-          cache_key
-        end
-
-        # Get cached schema result from SQLite
-        def get_cached_schema_result(connection_url)
-          cache_key = generate_schema_cache_key(connection_url)
-          cached = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
-
-          return nil unless cached
-
-          # Check if cache is expired
-          if Time.now > cached[:expires_at]
-            CACHE_DB[:schema_cache].where(cache_key: cache_key).delete
-            record_cache_stat('schema_cache_expiries', '1')
-            return nil
-          end
-
-          # Update hit count and last accessed time
-          CACHE_DB[:schema_cache].where(cache_key: cache_key).update(
-            hit_count: cached[:hit_count] + 1,
-            last_accessed_at: Time.now
-          )
-
-          # Reconstruct full result hash
-          schema_data = JSON.parse(cached[:schema_data], symbolize_names: true)
-          schema_metadata = JSON.parse(cached[:schema_metadata], symbolize_names: true)
-
-          record_cache_stat('schema_cache_hits', '1')
-
-          # Convert schema keys back to strings to match original format
-          converted_schema = {}
-          if schema_data[:schema].is_a?(Hash)
-            schema_data[:schema].each do |key, value|
-              converted_schema[key.to_s] = value
-            end
-            schema_data[:schema] = converted_schema
-          end
-
-          schema_data.merge(
-            cached: true,
-            cache_key: cache_key,
-            cached_at: cached[:cached_at],
-            table_count: schema_metadata[:table_count],
-            total_columns: schema_metadata[:total_columns]
-          )
-        end
-
-        # Clear expired schema cache entries
-        def clear_expired_schema_cache
-          deleted_count = CACHE_DB[:schema_cache].where(
-            Sequel.lit('expires_at < datetime("now")')
-          ).delete
-          record_cache_stat('expired_schema_entries_cleared', deleted_count.to_s)
-          deleted_count
-        end
-
-        # Clear all schema cache entries
-        def clear_all_schema_cache
-          deleted_count = CACHE_DB[:schema_cache].delete
-          record_cache_stat('full_schema_cache_clear', '1')
-          deleted_count
-        end
-
-        # Get schema cache statistics
-        def get_schema_cache_stats
-          total_entries = CACHE_DB[:schema_cache].count
-          expired_entries = CACHE_DB[:schema_cache].where(
-            Sequel.lit('expires_at < datetime("now")')
-          ).count
-
-          hit_stats = CACHE_DB[:schema_cache].select(
-            Sequel.function(:sum, :hit_count).as(:total_hits),
-            Sequel.function(:avg, :hit_count).as(:avg_hits_per_entry),
-            Sequel.function(:max, :hit_count).as(:max_hits)
-          ).first
-
-          size_stats = CACHE_DB[:schema_cache].select(
-            Sequel.function(:sum, Sequel.function(:length, :schema_data)).as(:total_data_size),
-            Sequel.function(:avg, Sequel.function(:length, :schema_data)).as(:avg_entry_size)
-          ).first
-
-          {
-            total_entries: total_entries,
-            expired_entries: expired_entries,
-            active_entries: total_entries - expired_entries,
-            total_hits: hit_stats[:total_hits] || 0,
-            avg_hits_per_entry: hit_stats[:avg_hits_per_entry]&.round(2) || 0,
-            max_hits: hit_stats[:max_hits] || 0,
-            total_data_size_bytes: size_stats[:total_data_size] || 0,
-            avg_entry_size_bytes: size_stats[:avg_entry_size]&.round(0) || 0,
-            cache_hit_ratio: calculate_schema_cache_hit_ratio
-          }
-        end
-
-        # Get top cached schemas by hit count
-        def get_top_cached_schemas(limit = 10)
-          CACHE_DB[:schema_cache]
-            .select(:connection_hash, :hit_count, :cached_at, :last_accessed_at)
-            .order(Sequel.desc(:hit_count))
-            .limit(limit)
-            .all
-        end
-
-        private
-
-        # Record cache statistics
-        def record_cache_stat(metric_name, metric_value)
-          CACHE_DB[:cache_stats].insert(
-            metric_name: metric_name,
-            metric_value: metric_value.to_s,
-            recorded_at: Time.now
-          )
-        rescue StandardError
-          # Fail silently for stats to avoid breaking main functionality
-        end
-
-        # Calculate cache hit ratio from recent stats
-        def calculate_cache_hit_ratio
-          recent_stats = CACHE_DB[:cache_stats]
-            .where(metric_name: ['cache_hits', 'cache_writes'])
-            .where(Sequel.lit('recorded_at > datetime("now", "-1 hour")'))
-            .group(:metric_name)
-            .select(:metric_name, Sequel.function(:count, '*').as(:count))
-            .all
-            .each_with_object({}) { |row, hash| hash[row[:metric_name]] = row[:count] }
-
-          hits = recent_stats['cache_hits'] || 0
-          writes = recent_stats['cache_writes'] || 0
-          total_requests = hits + writes
-
-          return 0.0 if total_requests == 0
-          (hits.to_f / total_requests * 100).round(2)
-        end
-
-        # Calculate schema cache hit ratio from recent stats
-        def calculate_schema_cache_hit_ratio
-          recent_stats = CACHE_DB[:cache_stats]
-            .where(metric_name: ['schema_cache_hits', 'schema_cache_writes'])
-            .where(Sequel.lit('recorded_at > datetime("now", "-1 hour")'))
-            .group(:metric_name)
-            .select(:metric_name, Sequel.function(:count, '*').as(:count))
-            .all
-            .each_with_object({}) { |row, hash| hash[row[:metric_name]] = row[:count] }
-
-          hits = recent_stats['schema_cache_hits'] || 0
-          writes = recent_stats['schema_cache_writes'] || 0
-          total_requests = hits + writes
-
-          return 0.0 if total_requests == 0
-          (hits.to_f / total_requests * 100).round(2)
-        end
-
-        # Sanitize connection URL for hashing (remove sensitive info)
-        def sanitize_connection_url(connection_url)
-          # Remove password from URL for hashing while keeping host/port/database
-          uri = URI.parse(connection_url)
-          uri.password = nil if uri.password
-          uri.to_s
-        rescue StandardError
-          # If URL parsing fails, just hash the whole thing
-          connection_url
-        end
+    def expired?(cached)
+      if Time.now > cached[:expires_at]
+        db[:dataclip_results].where(cache_key: cached[:cache_key]).delete
+        CacheStats.record('cache_expiries', '1')
+        true
+      else
+        false
       end
     end
 
-    puts '  - SQLite dataclip and schema cache helper methods loaded'
+    def update_hit_tracking(cache_key, cached)
+      db[:dataclip_results].where(cache_key: cache_key).update(
+        hit_count: cached[:hit_count] + 1,
+        last_accessed_at: Time.now
+      )
+    end
+
+    def reconstruct_result(cached)
+      result_data = JSON.parse(cached[:result_data], symbolize_names: true)
+      result_metadata = JSON.parse(cached[:result_metadata], symbolize_names: true)
+
+      CacheStats.record('cache_hits', '1')
+
+      result_data.merge(result_metadata).merge(
+        cached: true,
+        cache_key: cached[:cache_key],
+        cached_at: cached[:cached_at]
+      )
+    end
+  end
+end
+
+# Dedicated module for schema caching
+module SchemaCache
+  class << self
+    attr_writer :db
+
+    def db
+      @db ||= CACHE_DB
+    end
+
+    # Cache a schema result
+    def cache_result(connection_url, result_hash, ttl_seconds: 7200)
+      cache_key = generate_cache_key(connection_url)
+      connection_hash = hash_connection(connection_url)
+      expires_at = Time.now + ttl_seconds
+
+      schema_data = extract_schema_data(result_hash)
+      schema_metadata = calculate_metadata(result_hash)
+
+      db[:schema_cache].insert_conflict(:replace).insert(
+        cache_key: cache_key,
+        connection_hash: connection_hash,
+        schema_data: schema_data.to_json,
+        schema_metadata: schema_metadata.to_json,
+        cached_at: Time.now,
+        expires_at: expires_at,
+        ttl_seconds: ttl_seconds,
+        hit_count: 0,
+        last_accessed_at: Time.now
+      )
+
+      CacheStats.record('schema_cache_writes', '1')
+      cache_key
+    end
+
+    # Retrieve a cached schema result
+    def get_result(connection_url)
+      cache_key = generate_cache_key(connection_url)
+      cached = db[:schema_cache].where(cache_key: cache_key).first
+
+      return nil unless cached
+      return nil if expired?(cached)
+
+      update_hit_tracking(cache_key, cached)
+      reconstruct_result(cached)
+    end
+
+    # Clear expired schema cache entries
+    def clear_expired
+      deleted_count = db[:schema_cache].where(
+        Sequel.lit('expires_at < datetime("now")')
+      ).delete
+      CacheStats.record('expired_schema_entries_cleared', deleted_count.to_s)
+      deleted_count
+    end
+
+    # Clear all schema cache entries
+    def clear_all
+      deleted_count = db[:schema_cache].delete
+      CacheStats.record('full_schema_cache_clear', '1')
+      deleted_count
+    end
+
+    # Get schema cache statistics
+    def stats
+      total_entries = db[:schema_cache].count
+      expired_entries = db[:schema_cache].where(
+        Sequel.lit('expires_at < datetime("now")')
+      ).count
+
+      hit_stats = db[:schema_cache].select(
+        Sequel.function(:sum, :hit_count).as(:total_hits),
+        Sequel.function(:avg, :hit_count).as(:avg_hits_per_entry),
+        Sequel.function(:max, :hit_count).as(:max_hits)
+      ).first
+
+      size_stats = db[:schema_cache].select(
+        Sequel.function(:sum, Sequel.function(:length, :schema_data)).as(:total_data_size),
+        Sequel.function(:avg, Sequel.function(:length, :schema_data)).as(:avg_entry_size)
+      ).first
+
+      {
+        total_entries: total_entries,
+        expired_entries: expired_entries,
+        active_entries: total_entries - expired_entries,
+        total_hits: hit_stats[:total_hits] || 0,
+        avg_hits_per_entry: hit_stats[:avg_hits_per_entry]&.round(2) || 0,
+        max_hits: hit_stats[:max_hits] || 0,
+        total_data_size_bytes: size_stats[:total_data_size] || 0,
+        avg_entry_size_bytes: size_stats[:avg_entry_size]&.round(0) || 0,
+        cache_hit_ratio: CacheStats.calculate_hit_ratio('schema_cache_hits', 'schema_cache_writes')
+      }
+    end
+
+    # Get top cached schemas by hit count
+    def top_schemas(limit = 10)
+      db[:schema_cache]
+        .select(:connection_hash, :hit_count, :cached_at, :last_accessed_at)
+        .order(Sequel.desc(:hit_count))
+        .limit(limit)
+        .all
+    end
+
+    private
+
+    def generate_cache_key(connection_url)
+      connection_hash = hash_connection(connection_url)
+      "schema:#{connection_hash}"
+    end
+
+    def hash_connection(connection_url)
+      sanitized_url = sanitize_connection_url(connection_url)
+      Digest::SHA256.hexdigest(sanitized_url)
+    end
+
+    def sanitize_connection_url(connection_url)
+      # Remove password from URL for hashing while keeping host/port/database
+      uri = URI.parse(connection_url)
+      uri.password = nil if uri.password
+      uri.to_s
+    rescue StandardError
+      # If URL parsing fails, just hash the whole thing
+      connection_url
+    end
+
+    def extract_schema_data(result_hash)
+      {
+        success: result_hash[:success],
+        schema: result_hash[:schema],
+        errors: result_hash[:errors] || []
+      }
+    end
+
+    def calculate_metadata(result_hash)
+      table_count = result_hash[:schema]&.keys&.length || 0
+      total_columns = result_hash[:schema]&.values&.map { |table| table[:column_count] || 0 }&.sum || 0
+
+      {
+        table_count: table_count,
+        total_columns: total_columns,
+        fetch_time: result_hash[:fetch_time] || 0
+      }
+    end
+
+    def expired?(cached)
+      if Time.now > cached[:expires_at]
+        db[:schema_cache].where(cache_key: cached[:cache_key]).delete
+        CacheStats.record('schema_cache_expiries', '1')
+        true
+      else
+        false
+      end
+    end
+
+    def update_hit_tracking(cache_key, cached)
+      db[:schema_cache].where(cache_key: cache_key).update(
+        hit_count: cached[:hit_count] + 1,
+        last_accessed_at: Time.now
+      )
+    end
+
+    def reconstruct_result(cached)
+      schema_data = JSON.parse(cached[:schema_data], symbolize_names: true)
+      schema_metadata = JSON.parse(cached[:schema_metadata], symbolize_names: true)
+
+      CacheStats.record('schema_cache_hits', '1')
+
+      # Convert schema keys back to strings to match original format
+      converted_schema = {}
+      if schema_data[:schema].is_a?(Hash)
+        schema_data[:schema].each do |key, value|
+          converted_schema[key.to_s] = value
+        end
+        schema_data[:schema] = converted_schema
+      end
+
+      schema_data.merge(
+        cached: true,
+        cache_key: cached[:cache_key],
+        cached_at: cached[:cached_at],
+        table_count: schema_metadata[:table_count],
+        total_columns: schema_metadata[:total_columns],
+        fetch_time: schema_metadata[:fetch_time]
+      )
+    end
+  end
+end
+
+# Dedicated module for cache statistics
+module CacheStats
+  class << self
+    attr_writer :db
+
+    def db
+      @db ||= CACHE_DB
+    end
+
+    # Record a cache statistic
+    def record(metric_name, metric_value)
+      db[:cache_stats].insert(
+        metric_name: metric_name,
+        metric_value: metric_value.to_s,
+        recorded_at: Time.now
+      )
+    rescue StandardError
+      # Fail silently for stats to avoid breaking main functionality
+    end
+
+    # Calculate cache hit ratio from recent stats
+    def calculate_hit_ratio(hit_metric, write_metric)
+      recent_stats = db[:cache_stats]
+        .where(metric_name: [hit_metric, write_metric])
+        .where(Sequel.lit('recorded_at > datetime("now", "-1 hour")'))
+        .group(:metric_name)
+        .select(:metric_name, Sequel.function(:count, '*').as(:count))
+        .all
+        .each_with_object({}) { |row, hash| hash[row[:metric_name]] = row[:count] }
+
+      hits = recent_stats[hit_metric] || 0
+      writes = recent_stats[write_metric] || 0
+      total_requests = hits + writes
+
+      return 0.0 if total_requests == 0
+      (hits.to_f / total_requests * 100).round(2)
+    end
   end
 end

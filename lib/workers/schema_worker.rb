@@ -21,7 +21,7 @@ class SchemaWorker
 
       # Try to get cached result if caching is enabled
       if cache_enabled
-        cached_result = get_cached_schema_result(connection_url)
+        cached_result = SchemaCache.get_result(connection_url)
         if cached_result
           log_cache_hit(connection_url)
           return cached_result
@@ -54,7 +54,7 @@ class SchemaWorker
 
         # Cache the result if caching is enabled and fetch was successful
         if cache_enabled && result[:success]
-          cache_schema_result(connection_url, result, cache_ttl)
+          SchemaCache.cache_result(connection_url, result, ttl_seconds: cache_ttl)
           log_cache_write(connection_url)
         end
 
@@ -76,21 +76,21 @@ class SchemaWorker
     def clear_cache
       return 0 unless schema_caching_enabled?
 
-      clear_all_schema_cache
+      SchemaCache.clear_all
     end
 
     # Get schema cache statistics
     def cache_stats
       return {} unless schema_caching_enabled?
 
-      get_schema_cache_stats
+      SchemaCache.stats
     end
 
     # Clear expired schema cache entries
     def cleanup_cache
       return 0 unless schema_caching_enabled?
 
-      clear_expired_schema_cache
+      SchemaCache.clear_expired
     end
 
     private

@@ -21,7 +21,7 @@ class ClipWorker
 
       # Try to get cached result if caching is enabled
       if cache_enabled
-        cached_result = get_cached_dataclip_result(sql_query)
+        cached_result = DataclipCache.get_result(sql_query)
         if cached_result
           log_cache_hit(sql_query)
           return cached_result
@@ -67,7 +67,7 @@ class ClipWorker
 
         # Cache the result if caching is enabled and query was successful
         if cache_enabled && result[:success]
-          cache_dataclip_result(sql_query, result, nil, nil, cache_ttl)
+          DataclipCache.cache_result(sql_query, result, ttl_seconds: cache_ttl)
           log_cache_write(sql_query)
         end
 
@@ -111,7 +111,7 @@ class ClipWorker
 
       # Try to get cached result if caching is enabled
       if cache_enabled
-        cached_result = get_cached_dataclip_result(dataclip[:sql_query], nil, slug)
+        cached_result = DataclipCache.get_result(dataclip[:sql_query], dataclip_slug: slug)
         if cached_result
           log_cache_hit(dataclip[:sql_query], slug)
           return cached_result
@@ -123,7 +123,7 @@ class ClipWorker
 
       # Cache with dataclip slug if successful and caching enabled
       if cache_enabled && result[:success]
-        cache_dataclip_result(dataclip[:sql_query], result, slug, nil, cache_ttl)
+        DataclipCache.cache_result(dataclip[:sql_query], result, dataclip_slug: slug, ttl_seconds: cache_ttl)
         log_cache_write(dataclip[:sql_query], slug)
       end
 
@@ -134,21 +134,21 @@ class ClipWorker
     def invalidate_cache(slug)
       return 0 unless caching_enabled?
 
-      invalidate_dataclip_cache(slug)
+      DataclipCache.invalidate_by_slug(slug)
     end
 
     # Get cache statistics
     def cache_stats
       return {} unless caching_enabled?
 
-      get_dataclip_cache_stats
+      DataclipCache.stats
     end
 
     # Clear expired cache entries
     def cleanup_cache
       return 0 unless caching_enabled?
 
-      clear_expired_dataclip_cache
+      DataclipCache.clear_expired
     end
 
     private

@@ -4,18 +4,15 @@ require_relative '../../spec_helper'
 require_relative '../../../lib/workers/clip_worker'
 
 RSpec.describe ClipWorker do
-  before do
-    # Ensure we have a test database connection and cache setup
+  before(:all) do
+    # Ensure we have a test database connection and cache setup (only once)
     Config.setup! if defined?(Config)
     SQLiteInitializer.setup! if defined?(SQLiteInitializer)
   end
 
   after(:each) do
-    # Clean up cache between tests
-    if defined?(CACHE_DB)
-      CACHE_DB[:dataclip_results].delete
-      CACHE_DB[:cache_stats].delete
-    end
+    # Clean up cache between tests using the centralized reset method
+    SQLiteInitializer.reset_cache! if defined?(SQLiteInitializer)
   end
 
   describe '.execute' do
@@ -84,7 +81,7 @@ RSpec.describe ClipWorker do
         ClipWorker.execute(sql_query, cache_enabled: true, cache_ttl: custom_ttl)
 
         # Verify the cached entry has the custom TTL
-        cache_key = generate_dataclip_cache_key(sql_query)
+        cache_key = DataclipCache.send(:generate_cache_key, sql_query)
         cached_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
         expect(cached_entry[:ttl_seconds]).to eq(custom_ttl)
       end
@@ -96,7 +93,7 @@ RSpec.describe ClipWorker do
         expect(result1[:success]).to be false
 
         # Verify no cache entry was created
-        cache_key = generate_dataclip_cache_key(sql_query)
+        cache_key = DataclipCache.send(:generate_cache_key, sql_query)
         cached_entry = CACHE_DB[:dataclip_results].where(cache_key: cache_key).first
         expect(cached_entry).to be_nil
       end

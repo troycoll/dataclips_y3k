@@ -4,18 +4,15 @@ require_relative '../../spec_helper'
 require_relative '../../../lib/workers/schema_worker'
 
 RSpec.describe SchemaWorker do
-  before do
-    # Ensure we have a test database connection and cache setup
+  before(:all) do
+    # Ensure we have a test database connection and cache setup (only once)
     Config.setup! if defined?(Config)
     SQLiteInitializer.setup! if defined?(SQLiteInitializer)
   end
 
   after(:each) do
-    # Clean up cache between tests
-    if defined?(CACHE_DB)
-      CACHE_DB[:schema_cache].delete
-      CACHE_DB[:cache_stats].delete
-    end
+    # Clean up cache between tests using the centralized reset method
+    SQLiteInitializer.reset_cache! if defined?(SQLiteInitializer)
   end
 
   describe '.fetch_schema' do
@@ -117,7 +114,7 @@ RSpec.describe SchemaWorker do
         SchemaWorker.fetch_schema(connection_url, cache_enabled: true, cache_ttl: custom_ttl)
 
         # Verify the cached entry has the custom TTL
-        cache_key = generate_schema_cache_key(connection_url)
+        cache_key = SchemaCache.send(:generate_cache_key, connection_url)
         cached_entry = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
         expect(cached_entry[:ttl_seconds]).to eq(custom_ttl)
       end
@@ -129,7 +126,7 @@ RSpec.describe SchemaWorker do
         expect(result[:success]).to be false
 
         # Verify no cache entry was created
-        cache_key = generate_schema_cache_key(invalid_url)
+        cache_key = SchemaCache.send(:generate_cache_key, invalid_url)
         cached_entry = CACHE_DB[:schema_cache].where(cache_key: cache_key).first
         expect(cached_entry).to be_nil
       end
