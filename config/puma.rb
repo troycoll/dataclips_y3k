@@ -53,6 +53,3 @@ on_worker_boot do
   # Each worker needs its own connection pool
   ActiveRecord::Base.establish_connection if defined?(ActiveRecord::Base)
 end
-
-# Allow puma to be restarted by `rails restart` command
-plugin :tmp_restart
