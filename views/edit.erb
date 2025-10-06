@@ -16,6 +16,8 @@
         <form method="POST" action="<%= @dataclip ? "/dataclips/#{@dataclip[:slug]}/update" : "/dataclips/create" %>">
             <% if @dataclip %>
                 <input type="hidden" name="_method" value="PUT">
+            <% else %>
+                <input type="hidden" id="slug" name="slug" value="">
             <% end %>
             
             <div class="form-group">
@@ -23,11 +25,13 @@
                 <input type="text" id="title" name="title" value="<%= @dataclip ? @dataclip[:title] : '' %>" placeholder="Enter dataclip title">
             </div>
             
+            <% if @dataclip && @dataclip[:addon_name] %>
             <div class="form-group">
-                <label for="slug">Slug</label>
-                <input type="text" id="slug" name="slug" value="<%= @dataclip ? @dataclip[:slug] : '' %>" placeholder="url-friendly-name" <%= @dataclip ? 'readonly' : '' %>>
-                <small>URL-friendly identifier for this dataclip. Cannot be changed after creation.</small>
+                <label for="addon_name">Heroku Addon</label>
+                <input type="text" id="addon_name" name="addon_name" value="<%= @dataclip[:addon_name] %>" readonly>
+                <small>The Heroku database addon associated with this dataclip.</small>
             </div>
+            <% end %>
             
             <div class="form-group">
                 <label for="description">Description</label>
