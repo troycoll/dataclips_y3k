@@ -19,7 +19,7 @@ class SyncAddonsMediator < BaseMediator
   end
 
   def initialize(app_name: nil)
-    super()
+    super({})
     @app_name = app_name || ENV['HEROKU_APP_NAME']
     @synced_count = 0
     @skipped_count = 0
