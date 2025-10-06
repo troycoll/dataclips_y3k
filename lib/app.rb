@@ -57,6 +57,7 @@ end
 get '/dataclips/new' do
   # For creating a new dataclip
   @dataclip = nil
+  @addons = get_all_addons
   erb :edit
 end
 
@@ -69,6 +70,7 @@ get '/dataclips/:slug/edit' do
     session[:errors] = ["Dataclip with slug '#{params[:slug]}' not found"]
     redirect '/dataclips/list'
   else
+    @addons = get_all_addons
     erb :edit
   end
 end

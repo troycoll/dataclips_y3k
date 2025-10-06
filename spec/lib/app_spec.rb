@@ -37,6 +37,68 @@ RSpec.describe 'Dataclips App' do
     end
   end
 
+  describe 'GET /dataclips/new' do
+    let(:mock_addons) do
+      [
+        { uuid: '123e4567-e89b-12d3-a456-426614174000', name: 'postgresql-vertical-12345' },
+        { uuid: '223e4567-e89b-12d3-a456-426614174000', name: 'postgresql-horizontal-67890' }
+      ]
+    end
+
+    before do
+      # Mock get_all_addons to return test data
+      allow_any_instance_of(Sinatra::Application).to receive(:get_all_addons).and_return(mock_addons)
+    end
+
+    it 'returns successful response' do
+      get '/dataclips/new'
+      expect(last_response).to be_ok
+    end
+
+    it 'renders the edit template' do
+      get '/dataclips/new'
+      expect(last_response.body).to be_a(String)
+    end
+
+    it 'fetches all addons for the dropdown' do
+      expect_any_instance_of(Sinatra::Application).to receive(:get_all_addons).and_return(mock_addons)
+      get '/dataclips/new'
+      expect(last_response).to be_ok
+    end
+
+    it 'sets @dataclip to nil for new dataclips' do
+      get '/dataclips/new'
+      expect(last_response.body).to include('Create New Dataclip')
+    end
+
+    it 'includes addon dropdown in the response' do
+      get '/dataclips/new'
+      expect(last_response.body).to include('<select id="addon_name" name="addon_name">')
+    end
+
+    it 'includes addon options in the dropdown' do
+      get '/dataclips/new'
+      expect(last_response.body).to include('postgresql-vertical-12345')
+      expect(last_response.body).to include('postgresql-horizontal-67890')
+    end
+
+    it 'includes empty option in the dropdown' do
+      get '/dataclips/new'
+      expect(last_response.body).to include('-- Select an addon --')
+    end
+
+    context 'when no addons are available' do
+      before do
+        allow_any_instance_of(Sinatra::Application).to receive(:get_all_addons).and_return([])
+      end
+
+      it 'does not include addon dropdown' do
+        get '/dataclips/new'
+        expect(last_response.body).not_to include('<select id="addon_name" name="addon_name">')
+      end
+    end
+  end
+
   describe 'GET /dataclips/:slug' do
     let(:mock_dataclip) do
       {
@@ -80,10 +142,19 @@ RSpec.describe 'Dataclips App' do
       }
     end
 
+    let(:mock_addons) do
+      [
+        { uuid: '123e4567-e89b-12d3-a456-426614174000', name: 'postgresql-vertical-12345' },
+        { uuid: '223e4567-e89b-12d3-a456-426614174000', name: 'postgresql-horizontal-67890' }
+      ]
+    end
+
     before do
       allow_any_instance_of(Sinatra::Application).to receive(:get_dataclip).with('test-slug').and_return(mock_dataclip)
       # Mock the sync_heroku_addons helper to avoid actual API calls
       allow_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
+      # Mock get_all_addons to return test data
+      allow_any_instance_of(Sinatra::Application).to receive(:get_all_addons).and_return(mock_addons)
     end
 
     it 'returns successful response' do
@@ -100,6 +171,79 @@ RSpec.describe 'Dataclips App' do
       expect_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
       get '/dataclips/test-slug/edit'
       expect(last_response).to be_ok
+    end
+
+    it 'fetches all addons for the dropdown' do
+      expect_any_instance_of(Sinatra::Application).to receive(:get_all_addons).and_return(mock_addons)
+      get '/dataclips/test-slug/edit'
+      expect(last_response).to be_ok
+    end
+
+    context 'when dataclip has no addon' do
+      let(:mock_dataclip_no_addon) do
+        {
+          id: 1,
+          slug: 'test-slug',
+          title: 'Test Dataclip',
+          description: 'A test dataclip',
+          sql_query: 'SELECT * FROM users',
+          addon_name: nil,
+          created_by: 'test_user',
+          created_at: Time.now,
+          updated_at: Time.now
+        }
+      end
+
+      before do
+        allow_any_instance_of(Sinatra::Application).to receive(:get_dataclip).with('test-slug').and_return(mock_dataclip_no_addon)
+      end
+
+      it 'includes addon dropdown in the response' do
+        get '/dataclips/test-slug/edit'
+        expect(last_response.body).to include('<select id="addon_name" name="addon_name">')
+      end
+
+      it 'includes addon options in the dropdown' do
+        get '/dataclips/test-slug/edit'
+        expect(last_response.body).to include('postgresql-vertical-12345')
+        expect(last_response.body).to include('postgresql-horizontal-67890')
+      end
+
+      it 'includes empty option in the dropdown' do
+        get '/dataclips/test-slug/edit'
+        expect(last_response.body).to include('-- Select an addon --')
+      end
+    end
+
+    context 'when dataclip has an addon' do
+      let(:mock_dataclip_with_addon) do
+        {
+          id: 1,
+          slug: 'test-slug',
+          title: 'Test Dataclip',
+          description: 'A test dataclip',
+          sql_query: 'SELECT * FROM users',
+          addon_name: 'postgresql-vertical-12345',
+          created_by: 'test_user',
+          created_at: Time.now,
+          updated_at: Time.now
+        }
+      end
+
+      before do
+        allow_any_instance_of(Sinatra::Application).to receive(:get_dataclip).with('test-slug').and_return(mock_dataclip_with_addon)
+      end
+
+      it 'includes readonly addon field in the response' do
+        get '/dataclips/test-slug/edit'
+        expect(last_response.body).to include('readonly')
+        expect(last_response.body).to include('postgresql-vertical-12345')
+      end
+
+      it 'does not include addon dropdown when addon already exists' do
+        get '/dataclips/test-slug/edit'
+        expect(last_response.body).not_to include('<select id="addon_name" name="addon_name">')
+      end
     end
   end
 

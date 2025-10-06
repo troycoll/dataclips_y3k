@@ -31,6 +31,17 @@
                 <input type="text" id="addon_name" name="addon_name" value="<%= @dataclip[:addon_name] %>" readonly>
                 <small>The Heroku database addon associated with this dataclip.</small>
             </div>
+            <% elsif @addons && @addons.any? %>
+            <div class="form-group">
+                <label for="addon_name">Heroku Addon</label>
+                <select id="addon_name" name="addon_name">
+                    <option value="">-- Select an addon --</option>
+                    <% @addons.each do |addon| %>
+                        <option value="<%= addon[:name] %>"><%= addon[:name] %></option>
+                    <% end %>
+                </select>
+                <small>Select a Heroku database addon to associate with this dataclip.</small>
+            </div>
             <% end %>
             
             <div class="form-group">
