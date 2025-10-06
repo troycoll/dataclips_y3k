@@ -15,6 +15,11 @@ RSpec.describe 'Dataclips App' do
   end
 
   describe 'GET /dataclips/list' do
+    before do
+      # Mock the sync_heroku_addons helper to avoid actual API calls
+      allow_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
+    end
+
     it 'returns successful response' do
       get '/dataclips/list'
       expect(last_response).to be_ok
@@ -23,6 +28,12 @@ RSpec.describe 'Dataclips App' do
     it 'renders the list template' do
       get '/dataclips/list'
       expect(last_response.body).to be_a(String)
+    end
+
+    it 'syncs Heroku addons before rendering' do
+      expect_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
+      get '/dataclips/list'
+      expect(last_response).to be_ok
     end
   end
 
@@ -71,6 +82,8 @@ RSpec.describe 'Dataclips App' do
 
     before do
       allow_any_instance_of(Sinatra::Application).to receive(:get_dataclip).with('test-slug').and_return(mock_dataclip)
+      # Mock the sync_heroku_addons helper to avoid actual API calls
+      allow_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
     end
 
     it 'returns successful response' do
@@ -81,6 +94,12 @@ RSpec.describe 'Dataclips App' do
     it 'renders the edit template' do
       get '/dataclips/test-slug/edit'
       expect(last_response.body).to be_a(String)
+    end
+
+    it 'syncs Heroku addons before rendering' do
+      expect_any_instance_of(Sinatra::Application).to receive(:sync_heroku_addons)
+      get '/dataclips/test-slug/edit'
+      expect(last_response).to be_ok
     end
   end
 
@@ -275,6 +294,28 @@ RSpec.describe 'Dataclips App' do
       it 'combines flash_errors and flash_success' do
         get '/'
         expect(last_response).to be_redirect
+      end
+    end
+
+    describe '#sync_heroku_addons' do
+      it 'calls SyncAddonsMediator' do
+        mock_result = double('result', success?: true, synced_count: 2, errors: [])
+        expect(SyncAddonsMediator).to receive(:call).and_return(mock_result)
+
+        # Trigger the helper by visiting a route that calls it
+        allow_any_instance_of(Sinatra::Application).to receive(:get_all_dataclips).and_return([])
+        get '/dataclips/list'
+        expect(last_response).to be_ok
+      end
+
+      it 'handles sync failures gracefully' do
+        mock_result = double('result', success?: false, errors: ['API error'], synced_count: 0)
+        expect(SyncAddonsMediator).to receive(:call).and_return(mock_result)
+
+        # Should still render the page even if sync fails
+        allow_any_instance_of(Sinatra::Application).to receive(:get_all_dataclips).and_return([])
+        get '/dataclips/list'
+        expect(last_response).to be_ok
       end
     end
   end

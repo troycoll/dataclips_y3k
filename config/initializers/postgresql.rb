@@ -103,6 +103,40 @@ module PostgreSQLInitializer
         def delete_dataclip(slug)
           DB[:dataclips].where(slug: slug).delete
         end
+
+        # Upsert an addon (insert or update if exists)
+        def upsert_addon(uuid, name)
+          existing = DB[:addons].where(uuid: uuid).first
+
+          if existing
+            DB[:addons].where(uuid: uuid).update(
+              name: name,
+              updated_at: Time.now
+            )
+          else
+            DB[:addons].insert(
+              uuid: uuid,
+              name: name,
+              created_at: Time.now,
+              updated_at: Time.now
+            )
+          end
+        end
+
+        # Get an addon by UUID
+        def get_addon(uuid)
+          DB[:addons].where(uuid: uuid).first
+        end
+
+        # Get all addons from PostgreSQL
+        def get_all_addons
+          DB[:addons].order(:name).all
+        end
+
+        # Delete an addon by UUID
+        def delete_addon(uuid)
+          DB[:addons].where(uuid: uuid).delete
+        end
       end
 
       puts '  - PostgreSQL helper methods loaded'
