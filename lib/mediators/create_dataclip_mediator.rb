@@ -13,6 +13,10 @@ class CreateDataclipMediator < BaseMediator
     @sql_query = params[:sql_query]&.to_s&.strip
     @created_by = params[:created_by]&.to_s&.strip
     @created_by = nil if @created_by&.empty?
+    @addon_id = params[:addon_id]&.to_s&.strip
+    @addon_id = nil if @addon_id&.empty?
+    @addon_name = params[:addon_name]&.to_s&.strip
+    @addon_name = nil if @addon_name&.empty?
   end
 
   def call
@@ -27,7 +31,7 @@ class CreateDataclipMediator < BaseMediator
 
   private
 
-  attr_reader :slug, :title, :description, :sql_query, :created_by
+  attr_reader :slug, :title, :description, :sql_query, :created_by, :addon_id, :addon_name
 
   def validate_params
     validate_presence(:title, 'Title is required')
@@ -46,6 +50,8 @@ class CreateDataclipMediator < BaseMediator
         description: description,
         sql_query: sql_query,
         created_by: created_by,
+        addon_id: addon_id,
+        addon_name: addon_name,
         created_at: Time.now,
         updated_at: Time.now
       )

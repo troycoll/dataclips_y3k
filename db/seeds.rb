@@ -11,25 +11,53 @@ Config.setup!
 
 puts '🌱 Seeding database...'
 
+# Create a mock addon for development
+mock_addon = {
+  uuid: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+  name: 'postgresql-dev-12345'
+}
+
+# Clear existing sample addon in development
+if Config.development?
+  puts '  - Clearing existing sample addon...'
+  DB[:addons].where(name: mock_addon[:name]).delete
+end
+
+# Insert sample addon
+puts '  - Creating sample addon...'
+addon_id = DB[:addons].insert(
+  uuid: mock_addon[:uuid],
+  name: mock_addon[:name],
+  created_at: Time.now,
+  updated_at: Time.now
+)
+puts "  ✓ Created addon: #{mock_addon[:name]} (UUID: #{mock_addon[:uuid]})"
+
 # Sample dataclips for development
 sample_dataclips = [
   {
     title: 'Total User Count',
     description: 'Get the total number of users in the system',
     sql_query: 'SELECT COUNT(*) as total_users FROM users;',
-    created_by: 'admin'
+    created_by: 'admin',
+    addon_id: mock_addon[:uuid],
+    addon_name: mock_addon[:name]
   },
   {
     title: 'Recent User Signups',
     description: 'Users who signed up in the last 7 days',
     sql_query: 'SELECT id, email, created_at FROM users WHERE created_at >= NOW() - INTERVAL \'7 days\' ORDER BY created_at DESC;',
-    created_by: 'admin'
+    created_by: 'admin',
+    addon_id: mock_addon[:uuid],
+    addon_name: mock_addon[:name]
   },
   {
     title: 'Monthly Revenue Report',
     description: 'Revenue breakdown by month for the current year',
     sql_query: 'SELECT DATE_TRUNC(\'month\', created_at) as month, SUM(amount) as revenue FROM orders WHERE created_at >= DATE_TRUNC(\'year\', NOW()) GROUP BY month ORDER BY month;',
-    created_by: 'finance_team'
+    created_by: 'finance_team',
+    addon_id: mock_addon[:uuid],
+    addon_name: mock_addon[:name]
   }
 ]
 
