@@ -3,6 +3,7 @@
 source 'https://rubygems.org'
 
 gem 'dotenv'
+gem 'platform-api'
 gem 'pg'
 gem 'puma'
 gem 'rackup'
