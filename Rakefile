@@ -146,27 +146,13 @@ namespace :db do
       Sequel.extension :migration
 
       if environment == 'production'
-        puts '🔧 Running production migrations (dataclips table only)...'
-        # In production, only run the dataclips migration
-        dataclips_migration = File.join(MIGRATION_DIR, '001_create_dataclips.rb')
-        if File.exist?(dataclips_migration)
-          # Check if dataclips table already exists
-          if DB.table_exists?(:dataclips)
-            puts '   ✓ dataclips table already exists'
-          else
-            puts '   ⚙️  Creating dataclips table...'
-            Sequel::Migrator.run(DB, MIGRATION_DIR, target: 1)
-            puts '   ✅ dataclips table created successfully'
-          end
-        else
-          puts '   ❌ dataclips migration file not found'
-          exit 1
-        end
+        puts '🔧 Running production migrations...'
       else
         puts "🔧 Running all migrations for #{environment} environment..."
-        Sequel::Migrator.run(DB, MIGRATION_DIR)
-        puts 'Database migrations completed successfully'
       end
+
+      Sequel::Migrator.run(DB, MIGRATION_DIR)
+      puts 'Database migrations completed successfully'
     rescue Sequel::DatabaseError => e
       puts "Error running migrations: #{e.message}"
       exit 1
