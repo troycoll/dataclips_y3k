@@ -56,6 +56,7 @@ end
 
 get '/dataclips/new' do
   # For creating a new dataclip
+  sync_heroku_addons
   @dataclip = nil
   @addons = get_all_addons
   erb :edit
