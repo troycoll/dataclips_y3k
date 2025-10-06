@@ -3,11 +3,12 @@
 # Puma web server configuration
 # See: https://puma.io/puma/file.CONFIGURATION.html
 
-# The directory to operate out of
-directory '/Users/troy.coll/git/data/dataclips_y3k'
-
 # Set the environment in which the rack's app will run
 environment ENV.fetch('RACK_ENV', 'development')
+
+# Number of worker processes for cluster mode
+# Heroku recommends WEB_CONCURRENCY based on dyno size
+workers ENV.fetch('WEB_CONCURRENCY', 2).to_i
 
 # Daemonize the server into the background
 # daemonize
@@ -38,11 +39,19 @@ bind "tcp://0.0.0.0:#{ENV.fetch('PORT', 4567)}"
 #   puts 'On restart...'
 # end
 
+# Code to run before forking workers
+before_fork do
+  # Close database connections before forking
+  # This prevents connection sharing between parent and child processes
+  ActiveRecord::Base.connection_pool.disconnect! if defined?(ActiveRecord::Base)
+end
+
 # Code to run when a worker boots to setup the process before booting
 # the app
 on_worker_boot do
-  # Worker specific setup for Rails 4.1+
-  # See: https://devcenter.heroku.com/articles/deploying-rails-applications-with-the-puma-web-server#on-worker-boot
+  # Reconnect to database after forking
+  # Each worker needs its own connection pool
+  ActiveRecord::Base.establish_connection if defined?(ActiveRecord::Base)
 end
 
 # Allow puma to be restarted by `rails restart` command
