@@ -13,10 +13,10 @@ a demo app to showcase a potential new architecture for Heroku Dataclips
 
 ### Trying it out
 - clone this repository
-- `heroku apps:create heroku-dataclips-v3k-test`
+- `heroku apps:create heroku-dataclips-y3k-test`
   - optionally include the -s <space> flag if your target app is in a Private or Shield Space
-- `heroku addons:attach <addon-name> -a heroku-dataclips-v3k-test --as DATABASE_URL`
+- `heroku addons:attach <addon-name> -a heroku-dataclips-y3k-test --as DATABASE_URL`
 - `git push heroku main`
-- `heroku run 'bundle exec rake db:migrate' -a heroku-dataclips-v3k-test`
-- `heroku apps:open -a heroku-dataclips-v3k-test`
+- `heroku run 'bundle exec rake db:migrate' -a heroku-dataclips-y3k-test`
+- `heroku apps:open -a heroku-dataclips-y3k-test`
 - make some dataclips!
