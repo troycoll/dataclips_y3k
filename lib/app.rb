@@ -44,6 +44,24 @@ get '/dataclips/list' do
   erb :list
 end
 
+get '/dataclips/new' do
+  # For creating a new dataclip
+  @dataclip = nil
+  erb :edit
+end
+
+get '/dataclips/:slug/edit' do
+  # For editing an existing dataclip
+  @dataclip = get_dataclip(params[:slug])
+
+  if @dataclip.nil?
+    session[:errors] = ["Dataclip with slug '#{params[:slug]}' not found"]
+    redirect '/dataclips/list'
+  else
+    erb :edit
+  end
+end
+
 post '/dataclips/create' do
   result = CreateDataclipMediator.call(params)
 
@@ -53,17 +71,6 @@ post '/dataclips/create' do
   else
     session[:errors] = result.errors
     redirect '/dataclips/edit'
-  end
-end
-
-get '/dataclips/:slug/edit' do
-  @dataclip = get_dataclip(params[:slug])
-
-  if @dataclip.nil?
-    session[:errors] = ["Dataclip with slug '#{params[:slug]}' not found"]
-    redirect '/dataclips/list'
-  else
-    erb :edit
   end
 end
 
@@ -284,7 +291,7 @@ delete '/api/cache/schema' do
     cleared_count = SchemaWorker.clear_cache
     {
       success: true,
-      message: "Cleared all schema cache entries",
+      message: 'Cleared all schema cache entries',
       cleared_count: cleared_count
     }.to_json
   rescue StandardError => e
