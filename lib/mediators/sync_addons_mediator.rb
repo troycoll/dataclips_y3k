@@ -37,7 +37,7 @@ class SyncAddonsMediator < BaseMediator
     add_error("Failed to sync addons from Heroku: #{e.message}")
     self
   rescue StandardError => e
-    add_error("Unexpected error syncing addons: #{e.message}")
+    add_error("Unexpected error syncing addons: #{e}")
     self
   end
 
@@ -69,10 +69,28 @@ class SyncAddonsMediator < BaseMediator
     return unless addon_uuid && addon_name
 
     # Use upsert to insert or update the addon
-    upsert_addon(addon_uuid, addon_name)
+    upsert_addon_record(addon_uuid, addon_name)
     @synced_count += 1
   rescue StandardError => e
     add_error("Failed to sync addon '#{addon_name}': #{e.message}")
     @skipped_count += 1
+  end
+
+  def upsert_addon_record(uuid, name)
+    existing = DB[:addons].where(uuid: uuid).first
+
+    if existing
+      DB[:addons].where(uuid: uuid).update(
+        name: name,
+        updated_at: Time.now
+      )
+    else
+      DB[:addons].insert(
+        uuid: uuid,
+        name: name,
+        created_at: Time.now,
+        updated_at: Time.now
+      )
+    end
   end
 end

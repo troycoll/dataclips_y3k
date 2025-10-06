@@ -14,9 +14,11 @@ This feature automatically syncs Heroku addons to the local database whenever a 
   - Returns sync statistics (`synced_count`, `skipped_count`)
   - Inherits from `BaseMediator` for consistent error handling
 
-### 2. Database Helper Methods (`config/initializers/postgresql.rb`)
-Added helper methods for addon management:
-- `upsert_addon(uuid, name)` - Insert or update an addon
+### 2. Database Helper Methods
+The `SyncAddonsMediator` contains its own addon management method:
+- `upsert_addon_record(uuid, name)` - Insert or update an addon (private method)
+
+The `config/initializers/postgresql.rb` also provides global helper methods:
 - `get_addon(uuid)` - Retrieve a single addon by UUID
 - `get_all_addons` - Get all addons from the database
 - `delete_addon(uuid)` - Remove an addon by UUID
